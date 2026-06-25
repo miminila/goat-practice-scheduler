@@ -117,7 +117,8 @@ export default function BookingView({ mode }) {
     setBusy(true);
     await cancelSlot({ date: dk, slotTime: time, email: cancelEmail.trim() });
     setBusy(false);
-    const date = new Date(dk + "T12:00:00");
+    const dateParts = dk.split("-");
+    const date = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
     const dayLabel = date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
     notifyCoaches({ kind: "cancellation", name: "(student)", email: cancelEmail.trim(), day: dayLabel, slot: label });
     await refresh();
