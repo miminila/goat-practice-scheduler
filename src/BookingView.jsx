@@ -106,7 +106,7 @@ export default function BookingView({ mode }) {
       for (const [time, b] of Object.entries(slots)) {
         if (String(b.email).toLowerCase() === email.toLowerCase()) {
           const slot = DAILY_SLOTS.find(s => String(s.time) === String(time));
-          found.push({ dk, time, label: slot?.label, date });
+          found.push({ dk, time, label: slot?.label, dateStr: dk });
         }
       }
     }
@@ -117,11 +117,11 @@ export default function BookingView({ mode }) {
     setBusy(true);
     await cancelSlot({ date: dk, slotTime: time, email: cancelEmail.trim() });
     setBusy(false);
-    const date = new Date(dk + "T00:00:00");
+    const date = new Date(dk + "T12:00:00");
     const dayLabel = date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
     notifyCoaches({ kind: "cancellation", name: "(student)", email: cancelEmail.trim(), day: dayLabel, slot: label });
     await refresh();
-    setCancelResult({ success: `Your ${label} slot on ${dayLabel} has been cancelled. The spot is now open for others.` });
+    setCancelResult({ success: `✅ Your ${label} slot on ${dayLabel} has been cancelled. The spot is now open for others.` });
   }
 
   // ── BOOK VIEW ──
@@ -217,7 +217,7 @@ export default function BookingView({ mode }) {
               <div key={i} style={styles.cancelCard}>
                 <div><strong>{b.label}</strong>
                   <span style={{ marginLeft: 8, fontSize: 13, color: "#777", fontFamily: "sans-serif" }}>
-                    {b.date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+                    {new Date(b.dateStr + "T12:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
                   </span>
                 </div>
                 <button style={styles.cancelBtn} disabled={busy} onClick={() => doCancel(b.dk, b.time, b.label)}>Cancel</button>
