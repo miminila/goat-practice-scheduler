@@ -1,118 +1,132 @@
 import { useState, useEffect } from "react";
 import {
-  DAILY_SLOTS, getDays, formatDate, formatDayLabel, formatPhone,
-  loadBookings, saveBookings
+  DAILY_SLOTS, getDays, formatDate, formatDayLabel, isValidEmail,
+  loadBookings, bookSlot, cancelSlot
 } from "./utils";
 
-const TWILIO_WEBHOOK = import.meta.env.VITE_TWILIO_WEBHOOK || "";
-
-async function fireWebhook(payload) {
-  if (!TWILIO_WEBHOOK) return;
+// Booking-notification email to the coaches (Web3Forms — optional, no backend)
+const BOOKING_EMAIL_KEY = import.meta.env.VITE_BOOKING_EMAIL_KEY || "";
+async function notifyCoaches({ kind, name, email, day, slot }) {
+  if (!BOOKING_EMAIL_KEY) return;
+  const subject = kind === "cancellation"
+    ? `Goat practice CANCELLED — ${name}, ${day} ${slot}`
+    : `New goat practice booking — ${name}, ${day} ${slot}`;
+  const message =
+    `${kind === "cancellation" ? "A slot was cancelled." : "Someone booked a slot."}\n\n` +
+    `Name: ${name}\nEmail: ${email}\nDay: ${day}\nTime: ${slot}`;
   try {
-    await fetch(TWILIO_WEBHOOK, {
+    await fetch("https://api.web3forms.com/submit", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ access_key: BOOKING_EMAIL_KEY, subject, from_name: "Goat Practice", name, email, day, slot, message }),
     });
   } catch (_) {}
 }
 
+// Build a calendar file (.ics) with reminders the day before and 1 hour before
+function buildCalendarLink({ name, dateObj, slotTime, slotLabel }) {
+  const start = new Date(dateObj);
+  start.setMinutes(start.getMinutes() + slotTime);
+  const end = new Date(start); end.setMinutes(end.getMinutes() + 10);
+  const z = (n) => String(n).padStart(2, "0");
+  const fmt = (d) => `${d.getUTCFullYear()}${z(d.getUTCMonth() + 1)}${z(d.getUTCDate())}T${z(d.getUTCHours())}${z(d.getUTCMinutes())}00Z`;
+  const ics = [
+    "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Goat Practice//EN", "CALSCALE:GREGORIAN",
+    "BEGIN:VEVENT", `UID:goat-${Date.now()}@bookgoatpractice.com`, `DTSTAMP:${fmt(new Date())}`,
+    `DTSTART:${fmt(start)}`, `DTEND:${fmt(end)}`, "SUMMARY:Goat Practice",
+    `DESCRIPTION:Your 10-minute goat practice slot at ${slotLabel}. Booked for ${name}.`,
+    "BEGIN:VALARM", "TRIGGER:-P1D", "ACTION:DISPLAY", "DESCRIPTION:Goat practice tomorrow", "END:VALARM",
+    "BEGIN:VALARM", "TRIGGER:-PT1H", "ACTION:DISPLAY", "DESCRIPTION:Goat practice in 1 hour", "END:VALARM",
+    "END:VEVENT", "END:VCALENDAR",
+  ].join("\r\n");
+  return "data:text/calendar;charset=utf-8," + encodeURIComponent(ics);
+}
+
 export default function BookingView({ mode }) {
   const DAYS = getDays();
-  const [bookings, setBookings] = useState(null);
+  const [data, setData] = useState(null); // { bookings, blocked }
   const [selectedDay, setSelectedDay] = useState(0);
   const [modal, setModal] = useState(null);
-  const [form, setForm] = useState({ name: "", phone: "" });
-  const [cancelPhone, setCancelPhone] = useState("");
+  const [form, setForm] = useState({ name: "", email: "" });
+  const [busy, setBusy] = useState(false);
+  const [cancelEmail, setCancelEmail] = useState("");
   const [cancelResult, setCancelResult] = useState(null);
 
-  useEffect(() => { loadBookings().then(setBookings); }, []);
+  async function refresh() { setData(await loadBookings()); }
+  useEffect(() => { refresh(); }, []);
 
-  if (!bookings) return <div style={styles.loading}>Loading schedule…</div>;
+  if (!data) return <div style={styles.loading}>Loading schedule…</div>;
 
+  const bookings = data.bookings;
+  const blocked = data.blocked || {};
   const dayKey = formatDate(DAYS[selectedDay]);
   const dayBookings = bookings[dayKey] || {};
-  const openCount = DAILY_SLOTS.length - Object.keys(dayBookings).length;
+  const dayBlocked = !!blocked[dayKey];
+  const openCount = dayBlocked ? 0 : DAILY_SLOTS.length - Object.keys(dayBookings).length;
 
-  // ── BOOK ──
   async function confirmBook() {
-    const { slot } = modal;
     const name = form.name.trim();
-    const phone = form.phone.replace(/\D/g, "");
+    const email = form.email.trim();
     if (!name) { setModal({ type: "error", msg: "Please enter your name." }); return; }
-    if (phone.length < 10) { setModal({ type: "error", msg: "Please enter a valid 10-digit phone number." }); return; }
+    if (!isValidEmail(email)) { setModal({ type: "error", msg: "Please enter a valid email address." }); return; }
 
-    const existing = Object.entries(dayBookings).find(([, b]) => b.phone === phone);
-    if (existing) {
-      const existSlot = DAILY_SLOTS.find(s => s.time === parseInt(existing[0]));
-      setModal({ type: "error", msg: `You already have a slot at ${existSlot?.label} on this day.` });
+    const slot = modal.slot;
+    setBusy(true);
+    const res = await bookSlot({ date: dayKey, slotTime: slot.time, slotLabel: slot.label, name, email });
+    setBusy(false);
+
+    if (!res.ok) {
+      const msg = res.error === "taken"
+        ? "Sorry — someone just grabbed that slot. Please pick another."
+        : res.error === "blocked"
+        ? "That day was just blocked off. Please choose another day."
+        : "Something went wrong saving your booking. Please try again.";
+      await refresh();
+      setModal({ type: "error", msg });
       return;
     }
 
-    const updated = {
-      ...bookings,
-      [dayKey]: { ...dayBookings, [slot.time]: { name, phone, bookedAt: new Date().toISOString() } },
-    };
-    setBookings(updated);
-    await saveBookings(updated);
-
     const dayLabel = formatDayLabel(DAYS[selectedDay], selectedDay);
-    await fireWebhook({
-      event: "new_booking",
-      name, phone,
-      day: dayLabel,
-      date: dayKey,
-      slot: slot.label,
-      slotTime: slot.time,
-    });
-
-    setModal({
-      type: "success",
-      msg: `You're booked for ${slot.label} on ${dayLabel}! Watch for SMS reminders the day before and 1 hour before your slot.`,
-    });
+    notifyCoaches({ kind: "new", name, email, day: dayLabel, slot: slot.label });
+    const calLink = buildCalendarLink({ name, dateObj: DAYS[selectedDay], slotTime: slot.time, slotLabel: slot.label });
+    await refresh();
+    setModal({ type: "success", slotLabel: slot.label, dayLabel, calLink });
   }
 
-  // ── CANCEL LOOKUP ──
   async function handleCancelLookup() {
-    const phone = cancelPhone.replace(/\D/g, "");
-    if (phone.length < 10) { setCancelResult({ error: "Enter a valid 10-digit phone number." }); return; }
+    const email = cancelEmail.trim();
+    if (!isValidEmail(email)) { setCancelResult({ error: "Enter the email you used to book." }); return; }
+    const fresh = await loadBookings();
+    setData(fresh);
     const found = [];
     const today = new Date(); today.setHours(0, 0, 0, 0);
-    for (const [dk, slots] of Object.entries(bookings)) {
+    for (const [dk, slots] of Object.entries(fresh.bookings)) {
       const date = new Date(dk + "T00:00:00");
       if (date < today) continue;
       for (const [time, b] of Object.entries(slots)) {
-        if (b.phone === phone) {
-          const slot = DAILY_SLOTS.find(s => s.time === parseInt(time));
-          found.push({ dk, time: parseInt(time), label: slot?.label, name: b.name, date });
+        if (String(b.email).toLowerCase() === email.toLowerCase()) {
+          const slot = DAILY_SLOTS.find(s => String(s.time) === String(time));
+          found.push({ dk, time, label: slot?.label, date });
         }
       }
     }
-    setCancelResult(found.length ? { bookings: found } : { error: "No upcoming bookings found for that number." });
+    setCancelResult(found.length ? { bookings: found } : { error: "No upcoming bookings found for that email." });
   }
 
-  // ── CANCEL BOOKING ──
-  async function cancelBooking(dk, time) {
-    const b = bookings[dk]?.[time];
-    const updated = { ...bookings, [dk]: { ...bookings[dk] } };
-    delete updated[dk][time];
-    if (!Object.keys(updated[dk]).length) delete updated[dk];
-    setBookings(updated);
-    await saveBookings(updated);
-
-    const slot = DAILY_SLOTS.find(s => s.time === time);
+  async function doCancel(dk, time, label) {
+    setBusy(true);
+    await cancelSlot({ date: dk, slotTime: time, email: cancelEmail.trim() });
+    setBusy(false);
     const date = new Date(dk + "T00:00:00");
     const dayLabel = date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
-
-    await fireWebhook({ event: "cancellation", phone: b?.phone, name: b?.name, date: dk, day: dayLabel, slot: slot?.label });
-
-    setCancelResult({ success: `Your ${slot?.label} slot on ${dayLabel} has been cancelled. The spot is now open for others.` });
+    notifyCoaches({ kind: "cancellation", name: "(student)", email: cancelEmail.trim(), day: dayLabel, slot: label });
+    await refresh();
+    setCancelResult({ success: `Your ${label} slot on ${dayLabel} has been cancelled. The spot is now open for others.` });
   }
 
   // ── BOOK VIEW ──
   if (mode === "book") return (
     <div style={styles.body}>
-      {/* Day tabs */}
       <div style={styles.dayScroll}>
         {DAYS.map((d, i) => (
           <button key={i} style={{ ...styles.dayBtn, ...(selectedDay === i ? styles.dayBtnActive : {}) }} onClick={() => setSelectedDay(i)}>
@@ -122,31 +136,32 @@ export default function BookingView({ mode }) {
         ))}
       </div>
 
-      {/* Legend */}
       <div style={styles.legend}>
         <span style={styles.legendItem}><span style={{ ...styles.dot, background: "#4A7C3F" }} /> Open ({openCount})</span>
-        <span style={styles.legendItem}><span style={{ ...styles.dot, background: "#bbb" }} /> Taken ({DAILY_SLOTS.length - openCount})</span>
+        <span style={styles.legendItem}><span style={{ ...styles.dot, background: "#bbb" }} /> Taken</span>
         <span style={styles.legendItem}><span style={{ ...styles.dot, background: "#e0c97a", border: "1px dashed #b5922a" }} /> Lunch</span>
       </div>
 
-      {/* Slots */}
-      <div style={styles.grid}>
-        <div style={styles.lunchBar}>🍽 Lunch 12:00–1:00 PM — no slots available</div>
-        {DAILY_SLOTS.map(slot => {
-          const taken = !!dayBookings[slot.time];
-          return (
-            <button key={slot.time} disabled={taken} onClick={() => { setForm({ name: "", phone: "" }); setModal({ type: "confirm", slot }); }}
-              style={{ ...styles.slotBtn, ...(taken ? styles.slotTaken : styles.slotOpen) }}>
-              <span style={styles.slotTime}>{slot.label}</span>
-              <span style={styles.slotSub}>{taken ? "Taken" : "Available · 10 min"}</span>
-            </button>
-          );
-        })}
-      </div>
+      {dayBlocked ? (
+        <div style={styles.blockedBanner}>This day is closed — no practice scheduled. Please pick another day.</div>
+      ) : (
+        <div style={styles.grid}>
+          <div style={styles.lunchBar}>Lunch 12:00–1:00 PM — no slots</div>
+          {DAILY_SLOTS.map(slot => {
+            const taken = !!dayBookings[slot.time];
+            return (
+              <button key={slot.time} disabled={taken} onClick={() => { setForm({ name: "", email: "" }); setModal({ type: "confirm", slot }); }}
+                style={{ ...styles.slotBtn, ...(taken ? styles.slotTaken : styles.slotOpen) }}>
+                <span style={styles.slotTime}>{slot.label}</span>
+                <span style={styles.slotSub}>{taken ? "Taken" : "Available · 10 min"}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
-      {/* Modal */}
       {modal && (
-        <div style={styles.overlay} onClick={() => setModal(null)}>
+        <div style={styles.overlay} onClick={() => !busy && setModal(null)}>
           <div style={styles.modalBox} onClick={e => e.stopPropagation()}>
             {modal.type === "confirm" && <>
               <h3 style={styles.modalTitle}>Book {modal.slot.label}</h3>
@@ -154,19 +169,20 @@ export default function BookingView({ mode }) {
               <p style={styles.modalNote}>10-minute practice slot · arrive ready to go</p>
               <label style={styles.label}>Your name</label>
               <input style={styles.input} placeholder="First and last name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
-              <label style={styles.label}>Phone number <span style={{ color: "#C0392B" }}>*</span></label>
-              <input style={styles.input} type="tel" placeholder="(760) 555-1234" value={formatPhone(form.phone)} onChange={e => setForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, "").slice(0, 10) }))} />
-              <p style={styles.smsNote}>📱 You'll get a text reminder the day before and 1 hour before your slot.</p>
+              <label style={styles.label}>Email <span style={{ color: "#C0392B" }}>*</span></label>
+              <input style={styles.input} type="email" placeholder="you@email.com" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
+              <p style={styles.smsNote}>📅 After booking, tap "Add to Calendar" and your phone will remind you the day before and 1 hour before.</p>
               <div style={styles.btnRow}>
-                <button style={styles.backBtn} onClick={() => setModal(null)}>Back</button>
-                <button style={styles.confirmBtn} onClick={confirmBook}>Confirm Booking</button>
+                <button style={styles.backBtn} disabled={busy} onClick={() => setModal(null)}>Back</button>
+                <button style={styles.confirmBtn} disabled={busy} onClick={confirmBook}>{busy ? "Booking…" : "Confirm Booking"}</button>
               </div>
             </>}
             {modal.type === "success" && <>
               <div style={styles.bigIcon}>✅</div>
               <h3 style={styles.modalTitle}>You're booked!</h3>
-              <p style={styles.modalNote}>{modal.msg}</p>
-              <button style={styles.confirmBtn} onClick={() => setModal(null)}>Done</button>
+              <p style={styles.modalNote}>You've got {modal.slotLabel} on {modal.dayLabel}. Add it to your calendar so your phone reminds you — the day before and an hour before.</p>
+              <a href={modal.calLink} download="goat-practice.ics" style={styles.calBtn}>📅 Add to Calendar</a>
+              <button style={styles.doneBtn} onClick={() => setModal(null)}>Done</button>
             </>}
             {modal.type === "error" && <>
               <div style={styles.bigIcon}>⚠️</div>
@@ -185,11 +201,10 @@ export default function BookingView({ mode }) {
     <div style={styles.body}>
       <div style={styles.card}>
         <h2 style={styles.cardTitle}>Find my booking</h2>
-        <p style={styles.cardHint}>Enter the phone number you used when you booked.</p>
+        <p style={styles.cardHint}>Enter the email you used when you booked.</p>
         <div style={styles.row}>
-          <input style={{ ...styles.input, marginBottom: 0, flex: 1 }} type="tel" placeholder="(760) 555-1234"
-            value={formatPhone(cancelPhone)}
-            onChange={e => setCancelPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
+          <input style={{ ...styles.input, marginBottom: 0, flex: 1 }} type="email" placeholder="you@email.com"
+            value={cancelEmail} onChange={e => setCancelEmail(e.target.value)}
             onKeyDown={e => e.key === "Enter" && handleCancelLookup()} />
           <button style={styles.lookupBtn} onClick={handleCancelLookup}>Look up</button>
         </div>
@@ -200,13 +215,12 @@ export default function BookingView({ mode }) {
             <p style={{ margin: "0 0 10px", fontSize: 13, fontFamily: "sans-serif", color: "#555" }}>Your upcoming bookings:</p>
             {cancelResult.bookings.map((b, i) => (
               <div key={i} style={styles.cancelCard}>
-                <div>
-                  <strong>{b.label}</strong>
+                <div><strong>{b.label}</strong>
                   <span style={{ marginLeft: 8, fontSize: 13, color: "#777", fontFamily: "sans-serif" }}>
                     {b.date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
                   </span>
                 </div>
-                <button style={styles.cancelBtn} onClick={() => cancelBooking(b.dk, b.time)}>Cancel</button>
+                <button style={styles.cancelBtn} disabled={busy} onClick={() => doCancel(b.dk, b.time, b.label)}>Cancel</button>
               </div>
             ))}
           </div>
@@ -227,9 +241,10 @@ const styles = {
   legend: { display: "flex", gap: 16, marginBottom: 14, flexWrap: "wrap" },
   legendItem: { display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontFamily: "sans-serif", color: "#555" },
   dot: { display: "inline-block", width: 10, height: 10, borderRadius: "50%", flexShrink: 0 },
+  blockedBanner: { background: "#fdecea", border: "1px solid #f5c6c2", borderRadius: 10, padding: "16px", fontFamily: "sans-serif", fontSize: 14, color: "#922b21", textAlign: "center" },
   grid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(145px, 1fr))", gap: 8 },
   lunchBar: { gridColumn: "1/-1", background: "#EDE0C4", border: "1px dashed #C9A96E", borderRadius: 8, padding: "8px 14px", fontSize: 13, color: "#7a5c2e", fontFamily: "sans-serif", textAlign: "center" },
-  slotBtn: { display: "flex", flexDirection: "column", alignItems: "flex-start", padding: "10px 14px", border: "none", borderRadius: 10, cursor: "pointer", transition: "opacity 0.15s" },
+  slotBtn: { display: "flex", flexDirection: "column", alignItems: "flex-start", padding: "10px 14px", border: "none", borderRadius: 10, cursor: "pointer" },
   slotOpen: { background: "#4A7C3F", color: "white", boxShadow: "0 2px 6px rgba(74,124,63,0.3)" },
   slotTaken: { background: "#ddd", color: "#999", cursor: "not-allowed" },
   slotTime: { fontFamily: "sans-serif", fontSize: 15, fontWeight: "bold" },
@@ -245,6 +260,8 @@ const styles = {
   btnRow: { display: "flex", gap: 10 },
   backBtn: { flex: 1, padding: "11px 0", background: "#eee", border: "none", borderRadius: 8, fontFamily: "Georgia, serif", fontSize: 14, cursor: "pointer", color: "#555" },
   confirmBtn: { flex: 1, padding: "11px 0", background: "#3B2008", color: "#F5D78E", border: "none", borderRadius: 8, fontFamily: "Georgia, serif", fontSize: 15, cursor: "pointer", fontWeight: "bold" },
+  calBtn: { display: "block", textAlign: "center", padding: "12px 0", background: "#4A7C3F", color: "white", borderRadius: 8, fontFamily: "Georgia, serif", fontSize: 15, fontWeight: "bold", textDecoration: "none", marginBottom: 10 },
+  doneBtn: { width: "100%", padding: "11px 0", background: "#eee", color: "#555", border: "none", borderRadius: 8, fontFamily: "Georgia, serif", fontSize: 14, cursor: "pointer" },
   bigIcon: { fontSize: 40, textAlign: "center", marginBottom: 12 },
   card: { background: "white", borderRadius: 14, padding: 24, boxShadow: "0 2px 12px rgba(0,0,0,0.08)" },
   cardTitle: { margin: "0 0 6px", fontSize: 20, color: "#3B2008" },
