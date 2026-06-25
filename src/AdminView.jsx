@@ -1,144 +1,112 @@
 import { useState, useEffect } from "react";
-import { DAILY_SLOTS, getDays, formatDate, formatDayLabel, loadBookings, saveBookings } from "./utils";
+import { DAILY_SLOTS, getDays, formatDate, formatDayLabel, loadBookings, adminRemove, setDayBlock } from "./utils";
 
 export default function AdminView() {
   const DAYS = getDays();
-  const [bookings, setBookings] = useState(null);
+  const [data, setData] = useState(null); // { bookings, blocked }
   const [selectedDay, setSelectedDay] = useState(0);
-  const [blockedDays, setBlockedDays] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("goat-blocked-days") || "{}"); } catch { return {}; }
-  });
+  const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
 
-  useEffect(() => { loadBookings().then(setBookings); }, []);
+  async function refresh() { setData(await loadBookings()); }
+  useEffect(() => { refresh(); }, []);
 
-  function showToast(msg) {
-    setToast(msg);
-    setTimeout(() => setToast(""), 3000);
-  }
+  function showToast(msg) { setToast(msg); setTimeout(() => setToast(""), 3000); }
 
+  if (!data) return <div style={styles.loading}>Loading…</div>;
+
+  const bookings = data.bookings;
+  const blocked = data.blocked || {};
   const dayKey = formatDate(DAYS[selectedDay]);
-  const dayBookings = bookings?.[dayKey] || {};
-  const isBlocked = blockedDays[dayKey];
+  const dayBookings = bookings[dayKey] || {};
+  const isBlocked = !!blocked[dayKey];
   const bookedCount = Object.keys(dayBookings).length;
-  const openCount = DAILY_SLOTS.length - bookedCount;
+  const openCount = isBlocked ? 0 : DAILY_SLOTS.length - bookedCount;
 
   async function toggleBlock() {
-    const updated = { ...blockedDays };
-    if (isBlocked) { delete updated[dayKey]; showToast("Day unblocked — slots are open again."); }
-    else { updated[dayKey] = true; showToast("Day blocked — no new bookings allowed."); }
-    setBlockedDays(updated);
-    localStorage.setItem("goat-blocked-days", JSON.stringify(updated));
+    setBusy(true);
+    await setDayBlock({ date: dayKey, blocked: !isBlocked });
+    await refresh();
+    setBusy(false);
+    showToast(isBlocked ? "Day reopened — slots are bookable again." : "Day blocked — no new bookings allowed.");
   }
 
-  async function clearSlot(time) {
-    const b = bookings[dayKey]?.[time];
-    if (!b) return;
-    if (!window.confirm(`Remove ${b.name}'s booking at ${DAILY_SLOTS.find(s => s.time === parseInt(time))?.label}?`)) return;
-    const updated = { ...bookings, [dayKey]: { ...bookings[dayKey] } };
-    delete updated[dayKey][time];
-    if (!Object.keys(updated[dayKey]).length) delete updated[dayKey];
-    setBookings(updated);
-    await saveBookings(updated);
-    showToast(`${b.name}'s slot removed.`);
+  async function removeBooking(time, name, label) {
+    if (!window.confirm(`Remove ${name}'s booking at ${label}?`)) return;
+    setBusy(true);
+    await adminRemove({ date: dayKey, slotTime: time });
+    await refresh();
+    setBusy(false);
+    showToast(`${name}'s slot removed.`);
   }
 
-  if (!bookings) return <div style={styles.loading}>Loading…</div>;
-
-  // Build full day roster: all slots with their status
-  const roster = DAILY_SLOTS.map(slot => ({
-    slot,
-    booking: dayBookings[slot.time] || null,
-  }));
-
-  // Summary across all 10 days
-  const totalBooked = DAYS.reduce((sum, d) => {
-    const dk = formatDate(d);
-    return sum + Object.keys(bookings[dk] || {}).length;
-  }, 0);
+  const roster = DAILY_SLOTS.map(slot => ({ slot, booking: dayBookings[slot.time] || null }));
+  const totalBooked = DAYS.reduce((sum, d) => sum + Object.keys(bookings[formatDate(d)] || {}).length, 0);
 
   return (
     <div style={styles.body}>
       {toast && <div style={styles.toast}>{toast}</div>}
 
-      {/* Summary bar */}
       <div style={styles.summaryRow}>
-        <div style={styles.summaryCard}>
-          <span style={styles.summaryNum}>{totalBooked}</span>
-          <span style={styles.summaryLabel}>Total booked (10 days)</span>
-        </div>
-        <div style={styles.summaryCard}>
-          <span style={styles.summaryNum}>{bookedCount}</span>
-          <span style={styles.summaryLabel}>Booked today's view</span>
-        </div>
-        <div style={styles.summaryCard}>
-          <span style={styles.summaryNum}>{openCount}</span>
-          <span style={styles.summaryLabel}>Open today's view</span>
-        </div>
+        <div style={styles.summaryCard}><span style={styles.summaryNum}>{totalBooked}</span><span style={styles.summaryLabel}>Booked · 10 days</span></div>
+        <div style={styles.summaryCard}><span style={styles.summaryNum}>{bookedCount}</span><span style={styles.summaryLabel}>Booked this day</span></div>
+        <div style={styles.summaryCard}><span style={styles.summaryNum}>{openCount}</span><span style={styles.summaryLabel}>Open this day</span></div>
       </div>
 
-      {/* Day tabs */}
       <div style={styles.dayScroll}>
         {DAYS.map((d, i) => {
           const dk = formatDate(d);
           const count = Object.keys(bookings[dk] || {}).length;
-          const blocked = blockedDays[dk];
+          const blk = blocked[dk];
           return (
-            <button key={i} style={{ ...styles.dayBtn, ...(selectedDay === i ? styles.dayBtnActive : {}), ...(blocked ? styles.dayBtnBlocked : {}) }}
-              onClick={() => setSelectedDay(i)}>
+            <button key={i} style={{ ...styles.dayBtn, ...(selectedDay === i ? styles.dayBtnActive : {}), ...(blk ? styles.dayBtnBlocked : {}) }} onClick={() => setSelectedDay(i)}>
               <span style={styles.dayBtnTop}>{formatDayLabel(d, i)}</span>
-              <span style={styles.dayBtnSub}>{blocked ? "BLOCKED" : `${count}/${DAILY_SLOTS.length}`}</span>
+              <span style={styles.dayBtnSub}>{blk ? "BLOCKED" : `${count}/${DAILY_SLOTS.length}`}</span>
             </button>
           );
         })}
       </div>
 
-      {/* Day controls */}
       <div style={styles.dayHeader}>
         <div>
           <h2 style={styles.dayTitle}>{formatDayLabel(DAYS[selectedDay], selectedDay)}</h2>
           <p style={styles.daySubtitle}>{DAYS[selectedDay].toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</p>
         </div>
-        <button style={{ ...styles.blockBtn, ...(isBlocked ? styles.unblockBtn : {}) }} onClick={toggleBlock}>
-          {isBlocked ? "✅ Unblock Day" : "🚫 Block Day"}
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button style={styles.refreshBtn} disabled={busy} onClick={refresh}>↻ Refresh</button>
+          <button style={{ ...styles.blockBtn, ...(isBlocked ? styles.unblockBtn : {}) }} disabled={busy} onClick={toggleBlock}>
+            {isBlocked ? "Unblock Day" : "Block Day"}
+          </button>
+        </div>
       </div>
 
-      {isBlocked && (
-        <div style={styles.blockedBanner}>
-          🚫 This day is blocked — students cannot book new slots. Click "Unblock Day" to reopen.
-        </div>
-      )}
+      {isBlocked && <div style={styles.blockedBanner}>This day is blocked — students cannot book. Click "Unblock Day" to reopen.</div>}
 
-      {/* Roster table */}
       <div style={styles.rosterWrap}>
         <div style={styles.rosterHeader}>
-          <span style={styles.rosterCol}>Time</span>
-          <span style={{ ...styles.rosterCol, flex: 2 }}>Student</span>
-          <span style={styles.rosterCol}>Phone</span>
-          <span style={styles.rosterCol}>Action</span>
+          <span style={styles.colTime}>Time</span>
+          <span style={styles.colName}>Student</span>
+          <span style={styles.colEmail}>Email</span>
+          <span style={styles.colNotes}>Notes</span>
+          <span style={styles.colAct}></span>
         </div>
         {roster.map(({ slot, booking }) => (
-          <div key={slot.time} style={{ ...styles.rosterRow, ...(booking ? styles.rosterBooked : styles.rosterOpen) }}>
-            <span style={{ ...styles.rosterCol, fontWeight: "bold", fontFamily: "sans-serif" }}>{slot.label}</span>
-            <span style={{ ...styles.rosterCol, flex: 2, fontFamily: "sans-serif" }}>{booking ? booking.name : <span style={styles.openLabel}>— open —</span>}</span>
-            <span style={{ ...styles.rosterCol, fontFamily: "sans-serif", fontSize: 13, color: "#555" }}>
-              {booking ? `(${booking.phone.slice(0,3)}) ${booking.phone.slice(3,6)}-${booking.phone.slice(6)}` : ""}
-            </span>
-            <span style={styles.rosterCol}>
-              {booking && (
-                <button style={styles.removeBtn} onClick={() => clearSlot(slot.time)}>Remove</button>
-              )}
-            </span>
+          <div key={slot.time} style={{ ...styles.rosterRow, background: booking ? "#fff" : "#f9f6f0" }}>
+            <span style={styles.colTime}><strong>{slot.label}</strong></span>
+            <span style={styles.colName}>{booking ? booking.name : <span style={styles.openLabel}>— open —</span>}</span>
+            <span style={styles.colEmail}>{booking ? booking.email : ""}</span>
+            <span style={styles.colNotes}>{booking?.notes || ""}</span>
+            <span style={styles.colAct}>{booking && <button style={styles.removeBtn} disabled={busy} onClick={() => removeBooking(slot.time, booking.name, slot.label)}>Remove</button>}</span>
           </div>
         ))}
       </div>
+      <p style={styles.sheetHint}>Tip: to add notes next to a student, type them in the Notes column of the Google Sheet — they'll show up here.</p>
     </div>
   );
 }
 
 const styles = {
-  body: { padding: "20px 16px", maxWidth: 680, margin: "0 auto" },
+  body: { padding: "20px 16px", maxWidth: 760, margin: "0 auto" },
   loading: { padding: 40, textAlign: "center", fontFamily: "sans-serif", color: "#888" },
   toast: { position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: "#3B2008", color: "#F5D78E", padding: "12px 24px", borderRadius: 10, fontFamily: "sans-serif", fontSize: 14, zIndex: 200, boxShadow: "0 4px 16px rgba(0,0,0,0.2)" },
   summaryRow: { display: "flex", gap: 10, marginBottom: 20 },
@@ -151,18 +119,22 @@ const styles = {
   dayBtnBlocked: { background: "#fdecea", borderColor: "#C0392B", color: "#C0392B" },
   dayBtnTop: { fontSize: 12, fontWeight: "bold", fontFamily: "sans-serif" },
   dayBtnSub: { fontSize: 11, fontFamily: "sans-serif", opacity: 0.75 },
-  dayHeader: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 },
+  dayHeader: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12, gap: 10, flexWrap: "wrap" },
   dayTitle: { margin: "0 0 2px", fontSize: 22, color: "#3B2008" },
   daySubtitle: { margin: 0, fontSize: 13, fontFamily: "sans-serif", color: "#888" },
+  refreshBtn: { padding: "9px 14px", background: "#EDE0C4", color: "#7a5c2e", border: "none", borderRadius: 8, fontFamily: "sans-serif", fontSize: 13, cursor: "pointer", fontWeight: "bold" },
   blockBtn: { padding: "9px 16px", background: "#C0392B", color: "white", border: "none", borderRadius: 8, fontFamily: "sans-serif", fontSize: 13, cursor: "pointer", fontWeight: "bold" },
   unblockBtn: { background: "#4A7C3F" },
   blockedBanner: { background: "#fdecea", border: "1px solid #f5c6c2", borderRadius: 8, padding: "10px 14px", fontFamily: "sans-serif", fontSize: 13, color: "#922b21", marginBottom: 14 },
   rosterWrap: { background: "white", borderRadius: 12, overflow: "hidden", boxShadow: "0 2px 10px rgba(0,0,0,0.08)" },
   rosterHeader: { display: "flex", padding: "10px 14px", background: "#3B2008", color: "#F5D78E", fontFamily: "sans-serif", fontSize: 11, fontWeight: "bold", textTransform: "uppercase", letterSpacing: "0.5px" },
-  rosterRow: { display: "flex", padding: "11px 14px", borderBottom: "1px solid #f0e8d8", alignItems: "center" },
-  rosterBooked: { background: "#fff" },
-  rosterOpen: { background: "#f9f6f0" },
-  rosterCol: { flex: 1, fontSize: 14 },
+  rosterRow: { display: "flex", padding: "11px 14px", borderBottom: "1px solid #f0e8d8", alignItems: "center", fontFamily: "sans-serif", fontSize: 14 },
+  colTime: { width: 90, flexShrink: 0 },
+  colName: { flex: 1.4, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" },
+  colEmail: { flex: 1.6, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", fontSize: 13, color: "#555" },
+  colNotes: { flex: 1.2, minWidth: 0, fontSize: 13, color: "#777" },
+  colAct: { width: 80, flexShrink: 0, textAlign: "right" },
   openLabel: { color: "#bbb", fontStyle: "italic" },
   removeBtn: { padding: "4px 10px", background: "#C0392B", color: "white", border: "none", borderRadius: 6, fontFamily: "sans-serif", fontSize: 12, cursor: "pointer" },
+  sheetHint: { fontFamily: "sans-serif", fontSize: 12, color: "#999", marginTop: 12, textAlign: "center" },
 };
