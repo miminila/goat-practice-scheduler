@@ -78,21 +78,51 @@ async function sendNotification(subject, message) {
     await fetch("https://api.web3forms.com/submit", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        access_key: WEB3FORMS_KEY,
-        subject: subject,
-        message: message
-      })
+      body: JSON.stringify({ access_key: WEB3FORMS_KEY, subject: subject, message: message })
     });
   } catch (e) {
     console.error("sendNotification failed", e);
   }
 }
 
+export async function getSettings() {
+  try {
+    const res = await fetch(SUPABASE_URL + "/rest/v1/settings?select=key,value", { headers: sbHeaders() });
+    const rows = await res.json();
+    const settings = {};
+    for (const r of (Array.isArray(rows) ? rows : [])) {
+      settings[r.key] = r.value;
+    }
+    return settings;
+  } catch (e) {
+    console.error("getSettings failed", e);
+    return {};
+  }
+}
+
+export async function saveSetting(key, value) {
+  try {
+    const res = await fetch(
+      SUPABASE_URL + "/rest/v1/settings?key=eq." + encodeURIComponent(key),
+      { method: "PATCH", headers: sbHeaders({ "Prefer": "return=minimal" }), body: JSON.stringify({ value }) }
+    );
+    if (!res.ok) {
+      const res2 = await fetch(SUPABASE_URL + "/rest/v1/settings", {
+        method: "POST", headers: sbHeaders(), body: JSON.stringify({ key, value })
+      });
+      if (!res2.ok) return { ok: false, error: "network" };
+    }
+    return { ok: true };
+  } catch (e) {
+    console.error("saveSetting failed", e);
+    return { ok: false, error: "network" };
+  }
+}
+
 export async function loadBookings() {
   try {
     const [bRes, dRes] = await Promise.all([
-      fetch(SUPABASE_URL + "/rest/v1/bookings?select=date,time,name,email,notes", { headers: sbHeaders() }),
+      fetch(SUPABASE_URL + "/rest/v1/bookings?select=date,time,name,email,phone,notes", { headers: sbHeaders() }),
       fetch(SUPABASE_URL + "/rest/v1/blocked_days?select=date", { headers: sbHeaders() })
     ]);
     const rows = await bRes.json();
@@ -100,7 +130,7 @@ export async function loadBookings() {
     const bookings = {};
     for (const r of (Array.isArray(rows) ? rows : [])) {
       if (!bookings[r.date]) bookings[r.date] = {};
-      bookings[r.date][r.time] = { name: r.name, email: r.email, notes: r.notes || "" };
+      bookings[r.date][r.time] = { name: r.name, email: r.email, phone: r.phone || "", notes: r.notes || "" };
     }
     const blocked = {};
     for (const r of (Array.isArray(blockedRows) ? blockedRows : [])) {
@@ -118,17 +148,33 @@ export async function bookSlot(opts) {
     const res = await fetch(SUPABASE_URL + "/rest/v1/bookings", {
       method: "POST",
       headers: sbHeaders(),
-      body: JSON.stringify({ date: opts.date, time: opts.slotTime, slot_label: opts.slotLabel, name: opts.name, email: opts.email })
+      body: JSON.stringify({ date: opts.date, time: opts.slotTime, slot_label: opts.slotLabel, name: opts.name, email: opts.email, phone: opts.phone || "" })
     });
     if (res.status === 409) return { ok: false, error: "taken" };
     if (!res.ok) return { ok: false, error: "network" };
     sendNotification(
       "New Booking - ASCA Goat Practice",
-      "A new slot has been booked.\n\nName: " + opts.name + "\nEmail: " + opts.email + "\nDate: " + opts.date + "\nTime: " + opts.slotLabel
+      "A new slot has been booked.\n\nName: " + opts.name + "\nEmail: " + opts.email + "\nPhone: " + (opts.phone || "Not provided") + "\nDate: " + opts.date + "\nTime: " + opts.slotLabel
     );
     return { ok: true };
   } catch (e) {
     console.error("bookSlot failed", e);
+    return { ok: false, error: "network" };
+  }
+}
+
+export async function addBooking(opts) {
+  try {
+    const res = await fetch(SUPABASE_URL + "/rest/v1/bookings", {
+      method: "POST",
+      headers: sbHeaders(),
+      body: JSON.stringify({ date: opts.date, time: opts.slotTime, slot_label: opts.slotLabel, name: opts.name, email: opts.email, phone: opts.phone || "", notes: opts.notes || "" })
+    });
+    if (res.status === 409) return { ok: false, error: "taken" };
+    if (!res.ok) return { ok: false, error: "network" };
+    return { ok: true };
+  } catch (e) {
+    console.error("addBooking failed", e);
     return { ok: false, error: "network" };
   }
 }
