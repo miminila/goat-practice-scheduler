@@ -19,6 +19,7 @@ export function generateSlots() {
   }
   return slots;
 }
+
 export const DAILY_SLOTS = generateSlots();
 
 export function getDays() {
@@ -50,90 +51,117 @@ export function isValidEmail(s) {
   return at > 0 && dot > at + 1 && dot < str.length - 1;
 }
 
-const SHEET_API = import.meta.env.VITE_SHEET_API || "";
+// --- Database API (Supabase) ---
+const SUPABASE_URL = "https://kafxlwboepfekybipzog.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImthZnhsd2JvZXBmZWt5Ymlwem9nIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1NzMwMDMsImV4cCI6MjA5ODE0OTAwM30.RsuH-GXnv63_vRQ6-veg3o8xa_gBYPqu7KbYGAjJeXA";
 const LS_KEY = "goat-bookings-v1";
 
+function sbHeaders(extra) {
+  return Object.assign({
+    "apikey": SUPABASE_KEY,
+    "Authorization": "Bearer " + SUPABASE_KEY,
+    "Content-Type": "application/json",
+    "Prefer": "return=minimal"
+  }, extra || {});
+}
+
 function lsRead() {
-  try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}"); } catch (e) { return {}; }
+  try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}"); } catch { return {}; }
 }
 function lsWrite(obj) {
-  try { localStorage.setItem(LS_KEY, JSON.stringify(obj)); } catch (e) {}
+  try { localStorage.setItem(LS_KEY, JSON.stringify(obj)); } catch (_) {}
 }
 
 export async function loadBookings() {
-  if (!SHEET_API) {
-    return { bookings: lsRead(), blocked: {} };
-  }
   try {
-    const url = SHEET_API + "?action=list&t=" + Date.now();
-    const res = await fetch(url);
-    const data = await res.json();
-    if (!data || !data.ok) return { bookings: {}, blocked: {} };
+    const [bRes, dRes] = await Promise.all([
+      fetch(SUPABASE_URL + "/rest/v1/bookings?select=date,time,name,email,notes", { headers: sbHeaders() }),
+      fetch(SUPABASE_URL + "/rest/v1/blocked_days?select=date", { headers: sbHeaders() })
+    ]);
+    const rows = await bRes.json();
+    const blockedRows = await dRes.json();
     const bookings = {};
-    const blocked = {};
-    for (const r of data.bookings) {
-      if (String(r.slotTime) === "BLOCK") { blocked[r.date] = true; continue; }
+    for (const r of (Array.isArray(rows) ? rows : [])) {
       if (!bookings[r.date]) bookings[r.date] = {};
-      bookings[r.date][r.slotTime] = { name: r.name, email: r.email, notes: r.notes };
+      bookings[r.date][r.time] = { name: r.name, email: r.email, notes: r.notes || "" };
     }
-    return { bookings: bookings, blocked: blocked };
+    const blocked = {};
+    for (const r of (Array.isArray(blockedRows) ? blockedRows : [])) {
+      blocked[r.date] = true;
+    }
+    return { bookings, blocked };
   } catch (e) {
-    return { bookings: {}, blocked: {} };
-  }
-}
-
-async function postAction(payload) {
-  try {
-    const res = await fetch(SHEET_API, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify(payload),
-    });
-    return await res.json();
-  } catch (e) {
-    return { ok: false, error: "network" };
+    console.error("loadBookings failed", e);
+    return { bookings: lsRead(), blocked: {} };
   }
 }
 
 export async function bookSlot(opts) {
-  if (!SHEET_API) {
-    const all = lsRead();
-    if (all[opts.date] && all[opts.date][opts.slotTime]) return { ok: false, error: "taken" };
-    if (!all[opts.date]) all[opts.date] = {};
-    all[opts.date][opts.slotTime] = { name: opts.name, email: opts.email };
-    lsWrite(all);
+  try {
+    const res = await fetch(SUPABASE_URL + "/rest/v1/bookings", {
+      method: "POST",
+      headers: sbHeaders(),
+      body: JSON.stringify({ date: opts.date, time: opts.slotTime, slot_label: opts.slotLabel, name: opts.name, email: opts.email })
+    });
+    if (res.status === 409) return { ok: false, error: "taken" };
+    if (!res.ok) return { ok: false, error: "network" };
     return { ok: true };
+  } catch (e) {
+    console.error("bookSlot failed", e);
+    return { ok: false, error: "network" };
   }
-  return postAction({ action: "book", date: opts.date, slotTime: opts.slotTime, slotLabel: opts.slotLabel, name: opts.name, email: opts.email });
 }
 
 export async function cancelSlot(opts) {
-  if (!SHEET_API) {
-    const all = lsRead();
-    if (all[opts.date]) {
-      delete all[opts.date][opts.slotTime];
-      if (!Object.keys(all[opts.date]).length) delete all[opts.date];
-    }
-    lsWrite(all);
+  try {
+    const res = await fetch(
+      SUPABASE_URL + "/rest/v1/bookings?date=eq." + encodeURIComponent(opts.date) +
+      "&time=eq." + encodeURIComponent(opts.slotTime) +
+      "&email=eq." + encodeURIComponent(opts.email),
+      { method: "DELETE", headers: sbHeaders() }
+    );
+    if (!res.ok) return { ok: false, error: "network" };
     return { ok: true };
+  } catch (e) {
+    console.error("cancelSlot failed", e);
+    return { ok: false, error: "network" };
   }
-  return postAction({ action: "cancel", date: opts.date, slotTime: opts.slotTime, email: opts.email });
 }
 
 export async function adminRemove(opts) {
-  if (!SHEET_API) {
-    const all = lsRead();
-    if (all[opts.date]) {
-      delete all[opts.date][opts.slotTime];
-      if (!Object.keys(all[opts.date]).length) delete all[opts.date];
-    }
-    lsWrite(all);
+  try {
+    const res = await fetch(
+      SUPABASE_URL + "/rest/v1/bookings?date=eq." + encodeURIComponent(opts.date) +
+      "&time=eq." + encodeURIComponent(opts.slotTime),
+      { method: "DELETE", headers: sbHeaders() }
+    );
+    if (!res.ok) return { ok: false, error: "network" };
     return { ok: true };
+  } catch (e) {
+    console.error("adminRemove failed", e);
+    return { ok: false, error: "network" };
   }
-  return postAction({ action: "admincancel", date: opts.date, slotTime: opts.slotTime });
 }
 
 export async function setDayBlock(opts) {
-  if (!SHEET_API) return { ok: true };
-  return postAction({ action: opts.blocked ? "block" : "unblock", date: opts.date });
+  try {
+    if (opts.blocked) {
+      const res = await fetch(SUPABASE_URL + "/rest/v1/blocked_days", {
+        method: "POST",
+        headers: sbHeaders({ "Prefer": "return=minimal,resolution=ignore-duplicates" }),
+        body: JSON.stringify({ date: opts.date })
+      });
+      if (!res.ok && res.status !== 409) return { ok: false, error: "network" };
+    } else {
+      const res = await fetch(
+        SUPABASE_URL + "/rest/v1/blocked_days?date=eq." + encodeURIComponent(opts.date),
+        { method: "DELETE", headers: sbHeaders() }
+      );
+      if (!res.ok) return { ok: false, error: "network" };
+    }
+    return { ok: true };
+  } catch (e) {
+    console.error("setDayBlock failed", e);
+    return { ok: false, error: "network" };
+  }
 }
