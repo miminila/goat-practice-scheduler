@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import BookingView from "./BookingView";
 import AdminView from "./AdminView";
+import ChatBot from "./ChatBot";
 import { getSettings } from "./utils";
 
 export default function App() {
@@ -72,6 +73,8 @@ export default function App() {
             </div>
           )
       )}
+
+      <ChatBot />
     </div>
   );
 }
