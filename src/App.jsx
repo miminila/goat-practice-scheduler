@@ -11,7 +11,7 @@ export default function App() {
   const [adminError, setAdminError] = useState("");
   const [contactPhone, setContactPhone] = useState("");
 
-  const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || "Goat$2026";
+  const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || "ASCA$$0577";
 
   useEffect(() => {
     getSettings().then(s => setContactPhone(s.contact_phone || ""));
