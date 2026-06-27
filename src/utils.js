@@ -55,6 +55,7 @@ export function isValidEmail(s) {
 const SUPABASE_URL = "https://kafxlwboepfekybipzog.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImthZnhsd2JvZXBmZWt5Ymlwem9nIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1NzMwMDMsImV4cCI6MjA5ODE0OTAwM30.RsuH-GXnv63_vRQ6-veg3o8xa_gBYPqu7KbYGAjJeXA";
 const LS_KEY = "goat-bookings-v1";
+const WEB3FORMS_KEY = "041fdbc9-cf60-4674-a2e4-1ffa01ee0ab7";
 
 function sbHeaders(extra) {
   return Object.assign({
@@ -70,6 +71,22 @@ function lsRead() {
 }
 function lsWrite(obj) {
   try { localStorage.setItem(LS_KEY, JSON.stringify(obj)); } catch (_) {}
+}
+
+async function sendNotification(subject, message) {
+  try {
+    await fetch("https://api.web3forms.com/submit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        access_key: WEB3FORMS_KEY,
+        subject: subject,
+        message: message
+      })
+    });
+  } catch (e) {
+    console.error("sendNotification failed", e);
+  }
 }
 
 export async function loadBookings() {
@@ -105,6 +122,10 @@ export async function bookSlot(opts) {
     });
     if (res.status === 409) return { ok: false, error: "taken" };
     if (!res.ok) return { ok: false, error: "network" };
+    sendNotification(
+      "New Booking - ASCA Goat Practice",
+      "A new slot has been booked.\n\nName: " + opts.name + "\nEmail: " + opts.email + "\nDate: " + opts.date + "\nTime: " + opts.slotLabel
+    );
     return { ok: true };
   } catch (e) {
     console.error("bookSlot failed", e);
@@ -121,6 +142,10 @@ export async function cancelSlot(opts) {
       { method: "DELETE", headers: sbHeaders() }
     );
     if (!res.ok) return { ok: false, error: "network" };
+    sendNotification(
+      "Cancellation - ASCA Goat Practice",
+      "A booking has been cancelled.\n\nEmail: " + opts.email + "\nDate: " + opts.date + "\nTime: " + opts.slotLabel
+    );
     return { ok: true };
   } catch (e) {
     console.error("cancelSlot failed", e);
