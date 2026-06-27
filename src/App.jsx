@@ -21,9 +21,17 @@ export default function App() {
     if (adminInput === ADMIN_PASSWORD) {
       setAdminUnlocked(true);
       setAdminError("");
+      setAdminInput("");
     } else {
       setAdminError("Incorrect password.");
     }
+  }
+
+  function handleLogout() {
+    setAdminUnlocked(false);
+    setAdminInput("");
+    setAdminError("");
+    setPage("book");
   }
 
   return (
@@ -35,6 +43,9 @@ export default function App() {
             <h1 style={styles.title}>Goat Practice</h1>
             <p style={styles.subtitle}>Book · Cancel · Manage</p>
           </div>
+          {adminUnlocked && (
+            <button style={styles.logoutBtn} onClick={handleLogout}>🔓 Log Out</button>
+          )}
         </div>
         {contactPhone ? (
           <div style={styles.phoneBar}>
@@ -86,6 +97,7 @@ const styles = {
   logo: { fontSize: 42, lineHeight: 1 },
   title: { margin: 0, fontSize: 28, fontWeight: "bold", color: "#F5D7BE", letterSpacing: "-0.5px" },
   subtitle: { margin: "2px 0", fontSize: 13, color: "#C9A96E" },
+  logoutBtn: { marginLeft: "auto", padding: "6px 14px", background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.3)", borderRadius: 8, color: "white", cursor: "pointer", fontFamily: "sans-serif", fontSize: 13 },
   phoneBar: { background: "rgba(255,255,255,0.13)", borderRadius: 8, padding: "8px 14px", marginBottom: 10, fontFamily: "sans-serif", fontSize: 14, color: "#fff" },
   navRow: { display: "flex", gap: 4 },
   navBtn: { flex: 1, padding: "10px 0", border: "none", borderRadius: "8px 8px 0 0", background: "rgba(255,255,255,0.12)", color: "#C9A96E", fontFamily: "'Georgia', serif", fontSize: 13, cursor: "pointer" },
