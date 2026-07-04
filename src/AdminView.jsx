@@ -118,6 +118,10 @@ export default function AdminView() {
         <div style={styles.summaryCard}><span style={styles.summaryNum}>{openCount}</span><span style={styles.summaryLabel}>Open today</span></div>
       </div>
 
+      <div style={{ textAlign: "right", marginBottom: 4 }}>
+        <a href="#quick-reference" style={styles.jumpLink}>Quick Reference Guide</a>
+      </div>
+
       <div style={styles.dayScroll}>
         {DAYS.map((d, i) => {
           const dk = formatDate(d);
@@ -222,7 +226,7 @@ export default function AdminView() {
           );
         })}
       </div>
-    <div style={styles.quickRef}>
+    <div id="quick-reference" style={styles.quickRef}>
       <h3 style={styles.quickRefTitle}>Quick Reference</h3>
       <table style={styles.quickRefTable}>
         <thead>
@@ -300,6 +304,7 @@ const styles = {
   openLabel: { color: "#4A7C3F", fontStyle: "italic" },
   closedLabel: { color: "#bbb", fontStyle: "italic" },
   removeBtn: { padding: "4px 10px", background: "#C0392B", color: "white", border: "none", borderRadius: 6, fontFamily: "sans-serif", fontSize: 12, cursor: "pointer" },
+  jumpLink: { fontFamily: "sans-serif", fontSize: 12, color: "#2471A3", textDecoration: "none", cursor: "pointer", borderBottom: "1px dotted #2471A3" },
   quickRef: { marginTop: 28, background: "white", borderRadius: 12, padding: 20, boxShadow: "0 2px 10px rgba(0,0,0,0.08)", border: "1px solid #EDE0C4" },
   quickRefTitle: { margin: "0 0 12px", fontSize: 16, color: "#3B2008", fontFamily: "Georgia, serif" },
   quickRefTable: { width: "100%", borderCollapse: "collapse", fontFamily: "sans-serif", fontSize: 13 },
