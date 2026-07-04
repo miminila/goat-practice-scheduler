@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import {
   DAILY_SLOTS, getDays, formatDate, formatDayLabel, isValidEmail, isValidPhone, formatPhone,
-  loadBookings, bookSlot, cancelSlot
+  loadBookings, bookSlot, cancelSlot, isSlotAvailable
 } from "./utils";
 
 const BOOKING_EMAIL_KEY = import.meta.env.VITE_BOOKING_EMAIL_KEY || "";
@@ -157,13 +157,14 @@ export default function BookingView({ mode }) {
             const taken = !!dayBookings[slot.time];
             const now = new Date();
             const isPast = selectedDay === 0 && (now.getHours() * 60 + now.getMinutes()) >= slot.time;
-            const unavailable = taken || isPast;
+            const isOutsideHours = !isSlotInWindows(slot.time, dayHours[dayKey]);
+            const unavailable = taken || isPast || isOutsideHours;
             return (
               <button key={slot.time} disabled={unavailable}
                 onClick={() => { setForm({ name: "", email: "", phone: "" }); setModal({ type: "confirm", slot }); }}
                 style={{ ...styles.slotBtn, ...(unavailable ? styles.slotTaken : styles.slotOpen) }}>
                 <span style={styles.slotTime}>{slot.label}</span>
-                <span style={styles.slotSub}>{taken ? "Taken" : isPast ? "Past" : "Available - 10 min"}</span>
+                <span style={styles.slotSub}>{taken ? "Taken" : isPast ? "Past" : isOutsideHours ? "Closed" : "Available - 10 min"}</span>
               </button>
             );
           })}
