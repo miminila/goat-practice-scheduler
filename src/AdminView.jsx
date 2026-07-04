@@ -3,11 +3,16 @@ import { DAILY_SLOTS, getDays, formatDate, formatDayLabel, loadBookings, adminRe
 
 const TIME_OPTS = makeTimeOptions();
 
-function TimeSelect({ value, onChange, placeholder }) {
+function TimeSelect({ value, onChange, placeholder, minValue, maxValue }) {
+  const filtered = TIME_OPTS.filter(o => {
+    if (minValue != null && o.value <= minValue) return false;
+    if (maxValue != null && o.value >= maxValue) return false;
+    return true;
+  });
   return (
     <select style={styles.timeSelect} value={value == null ? "" : value} onChange={e => onChange(e.target.value === "" ? null : parseInt(e.target.value))}>
       <option value="">{placeholder}</option>
-      {TIME_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      {filtered.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
     </select>
   );
 }
@@ -19,6 +24,7 @@ export default function AdminView() {
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
   const [showHours, setShowHours] = useState(false);
+  const [hoursError, setHoursError] = useState("");
   const [hoursForm, setHoursForm] = useState({ morning_start: null, morning_end: null, afternoon_start: null, afternoon_end: null, lunch_blocked: true });
 
   async function refresh() { setData(await loadBookings()); }
@@ -58,11 +64,24 @@ export default function AdminView() {
   }
 
   async function handleSaveHours() {
+    setHoursError("");
+    const { morning_start, morning_end, afternoon_start, afternoon_end } = hoursForm;
+    const hasMorning = morning_start != null && morning_end != null;
+    const hasAfternoon = afternoon_start != null && afternoon_end != null;
+    if (morning_start != null && morning_end == null) { setHoursError("Please set a morning end time."); return; }
+    if (morning_start == null && morning_end != null) { setHoursError("Please set a morning start time."); return; }
+    if (afternoon_start != null && afternoon_end == null) { setHoursError("Please set an afternoon end time."); return; }
+    if (afternoon_start == null && afternoon_end != null) { setHoursError("Please set an afternoon start time."); return; }
+    if (hasMorning && morning_end <= morning_start) { setHoursError("Morning end time must be after morning start time."); return; }
+    if (hasAfternoon && afternoon_end <= afternoon_start) { setHoursError("Afternoon end time must be after afternoon start time."); return; }
+    if (hasMorning && hasAfternoon && afternoon_start <= morning_end) { setHoursError("Afternoon start must be after the morning window ends."); return; }
+    if (!hasMorning && !hasAfternoon) { setHoursError("Please set at least one time window, or use Clear Custom Hours to restore the full day."); return; }
     setBusy(true);
     await saveDayHours(dayKey, hoursForm);
     await refresh();
     setBusy(false);
     setShowHours(false);
+    setHoursError("");
     showToast("Hours saved for " + formatDayLabel(DAYS[selectedDay], selectedDay) + ".");
   }
 
@@ -139,18 +158,18 @@ export default function AdminView() {
           <div style={styles.hoursSection}>
             <div style={styles.hoursSectionTitle}>Morning window</div>
             <div style={styles.hoursRow}>
-              <TimeSelect value={hoursForm.morning_start} onChange={v => setHoursForm(f => ({ ...f, morning_start: v }))} placeholder="Start time" />
+              <TimeSelect value={hoursForm.morning_start} onChange={v => setHoursForm(f => ({ ...f, morning_start: v, morning_end: f.morning_end != null && v != null && f.morning_end <= v ? null : f.morning_end }))} placeholder="Start time" />
               <span style={styles.hoursTo}>to</span>
-              <TimeSelect value={hoursForm.morning_end} onChange={v => setHoursForm(f => ({ ...f, morning_end: v }))} placeholder="End time" />
+              <TimeSelect value={hoursForm.morning_end} onChange={v => setHoursForm(f => ({ ...f, morning_end: v }))} placeholder="End time" minValue={hoursForm.morning_start} />
             </div>
           </div>
 
           <div style={styles.hoursSection}>
             <div style={styles.hoursSectionTitle}>Afternoon window</div>
             <div style={styles.hoursRow}>
-              <TimeSelect value={hoursForm.afternoon_start} onChange={v => setHoursForm(f => ({ ...f, afternoon_start: v }))} placeholder="Start time" />
+              <TimeSelect value={hoursForm.afternoon_start} onChange={v => setHoursForm(f => ({ ...f, afternoon_start: v, afternoon_end: f.afternoon_end != null && v != null && f.afternoon_end <= v ? null : f.afternoon_end }))} placeholder="Start time" minValue={hoursForm.morning_end} />
               <span style={styles.hoursTo}>to</span>
-              <TimeSelect value={hoursForm.afternoon_end} onChange={v => setHoursForm(f => ({ ...f, afternoon_end: v }))} placeholder="End time" />
+              <TimeSelect value={hoursForm.afternoon_end} onChange={v => setHoursForm(f => ({ ...f, afternoon_end: v }))} placeholder="End time" minValue={hoursForm.afternoon_start} />
             </div>
           </div>
 
@@ -162,6 +181,7 @@ export default function AdminView() {
             </label>
           </div>
 
+          {hoursError && <p style={{ color: "#C0392B", fontFamily: "sans-serif", fontSize: 13, margin: "0 0 10px", background: "#fdecea", padding: "8px 12px", borderRadius: 8 }}>{hoursError}</p>}
           <div style={styles.hoursBtns}>
             <button style={styles.cancelHoursBtn} onClick={() => setShowHours(false)}>Cancel</button>
             {hasCustomHours && <button style={styles.clearHoursBtn} disabled={busy} onClick={handleClearHours}>Clear Custom Hours</button>}
