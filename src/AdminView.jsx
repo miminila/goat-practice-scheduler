@@ -222,6 +222,33 @@ export default function AdminView() {
           );
         })}
       </div>
+    <div style={styles.quickRef}>
+      <h3 style={styles.quickRefTitle}>Quick Reference</h3>
+      <table style={styles.quickRefTable}>
+        <thead>
+          <tr>
+            <th style={styles.quickRefTh}>Task</th>
+            <th style={styles.quickRefTh}>How</th>
+          </tr>
+        </thead>
+        <tbody>
+          {[
+            ["Block a whole day", "Click day tab → Block Day"],
+            ["Unblock a day", "Click day tab → Unblock Day"],
+            ["Set custom hours", "Click day tab → Set Hours"],
+            ["Clear custom hours", "Set Hours → Clear Custom Hours"],
+            ["Remove a booking", "Click day → Remove next to name"],
+            ["Student cancels", "bookgoatpractice.com → Cancel My Slot"],
+          ].map(([task, how], i) => (
+            <tr key={i} style={{ background: i % 2 === 0 ? "#f9f6f0" : "white" }}>
+              <td style={styles.quickRefTd}><strong>{task}</strong></td>
+              <td style={styles.quickRefTd}>{how}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p style={styles.quickRefNote}>Students book at <strong>bookgoatpractice.com</strong> · Password: <strong>Goat$2026</strong></p>
+    </div>
     </div>
   );
 }
@@ -273,4 +300,10 @@ const styles = {
   openLabel: { color: "#4A7C3F", fontStyle: "italic" },
   closedLabel: { color: "#bbb", fontStyle: "italic" },
   removeBtn: { padding: "4px 10px", background: "#C0392B", color: "white", border: "none", borderRadius: 6, fontFamily: "sans-serif", fontSize: 12, cursor: "pointer" },
+  quickRef: { marginTop: 28, background: "white", borderRadius: 12, padding: 20, boxShadow: "0 2px 10px rgba(0,0,0,0.08)", border: "1px solid #EDE0C4" },
+  quickRefTitle: { margin: "0 0 12px", fontSize: 16, color: "#3B2008", fontFamily: "Georgia, serif" },
+  quickRefTable: { width: "100%", borderCollapse: "collapse", fontFamily: "sans-serif", fontSize: 13 },
+  quickRefTh: { background: "#3B2008", color: "#F5D78E", padding: "8px 12px", textAlign: "left", fontWeight: "bold", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.4px" },
+  quickRefTd: { padding: "8px 12px", borderBottom: "1px solid #f0e8d8", verticalAlign: "top" },
+  quickRefNote: { margin: "12px 0 0", fontFamily: "sans-serif", fontSize: 12, color: "#888", textAlign: "center" },
 };
