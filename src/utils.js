@@ -1,3 +1,11 @@
+
+utils.js
+
+Page
+1
+/
+1
+100%
 export const SLOT_INTERVAL = 15;
 export const DAY_START = 8 * 60;
 export const DAY_END = 16 * 60;
@@ -19,7 +27,6 @@ export function generateSlots() {
   }
   return slots;
 }
-
 export const DAILY_SLOTS = generateSlots();
 
 export function getDays() {
@@ -51,188 +58,115 @@ export function isValidEmail(s) {
   return at > 0 && dot > at + 1 && dot < str.length - 1;
 }
 
-// --- Database API (Supabase) ---
-const SUPABASE_URL = "https://kafxlwboepfekybipzog.supabase.co";
-const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImthZnhsd2JvZXBmZWt5Ymlwem9nIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1NzMwMDMsImV4cCI6MjA5ODE0OTAwM30.RsuH-GXnv63_vRQ6-veg3o8xa_gBYPqu7KbYGAjJeXA";
-const LS_KEY = "goat-bookings-v1";
-const WEB3FORMS_KEY = "041fdbc9-cf60-4674-a2e4-1ffa01ee0ab7";
-
-function sbHeaders(extra) {
-  return Object.assign({
-    "apikey": SUPABASE_KEY,
-    "Authorization": "Bearer " + SUPABASE_KEY,
-    "Content-Type": "application/json",
-    "Prefer": "return=minimal"
-  }, extra || {});
+export function isValidPhone(s) {
+  return String(s).replace(/\D/g, "").length >= 10;
 }
 
-function lsRead() {
-  try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}"); } catch { return {}; }
-}
-function lsWrite(obj) {
-  try { localStorage.setItem(LS_KEY, JSON.stringify(obj)); } catch (_) {}
+export function formatPhone(raw) {
+  const digits = String(raw).replace(/\D/g, "");
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 6) return "(" + digits.slice(0, 3) + ") " + digits.slice(3);
+  return "(" + digits.slice(0, 3) + ") " + digits.slice(3, 6) + "-" + digits.slice(6, 10);
 }
 
-async function sendNotification(subject, message) {
-  try {
-    await fetch("https://api.web3forms.com/submit", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ access_key: WEB3FORMS_KEY, subject: subject, message: message })
-    });
-  } catch (e) {
-    console.error("sendNotification failed", e);
+const SUPA_URL = "https://kafxlwboepfekybipzog.supabase.co";
+const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImthZnhsd2JvZXBmZWt5Ymlwem9nIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1NzMwMDMsImV4cCI6MjA5ODE0OTAwM30.RsuH-GXnv63_vRQ6-veg3o8xa_gBYPqu7KbYGAjJeXA";
+
+async function supa(path, opts) {
+  const res = await fetch(SUPA_URL + "/rest/v1/" + path, {
+    headers: {
+      "apikey": SUPA_KEY,
+      "Authorization": "Bearer " + SUPA_KEY,
+      "Content-Type": "application/json",
+      "Prefer": opts && opts.prefer ? opts.prefer : "return=representation",
+    },
+    ...opts,
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(err);
   }
-}
-
-export async function getSettings() {
-  try {
-    const res = await fetch(SUPABASE_URL + "/rest/v1/settings?select=key,value", { headers: sbHeaders() });
-    const rows = await res.json();
-    const settings = {};
-    for (const r of (Array.isArray(rows) ? rows : [])) {
-      settings[r.key] = r.value;
-    }
-    return settings;
-  } catch (e) {
-    console.error("getSettings failed", e);
-    return {};
-  }
-}
-
-export async function saveSetting(key, value) {
-  try {
-    const res = await fetch(
-      SUPABASE_URL + "/rest/v1/settings?key=eq." + encodeURIComponent(key),
-      { method: "PATCH", headers: sbHeaders({ "Prefer": "return=minimal" }), body: JSON.stringify({ value }) }
-    );
-    if (!res.ok) {
-      const res2 = await fetch(SUPABASE_URL + "/rest/v1/settings", {
-        method: "POST", headers: sbHeaders(), body: JSON.stringify({ key, value })
-      });
-      if (!res2.ok) return { ok: false, error: "network" };
-    }
-    return { ok: true };
-  } catch (e) {
-    console.error("saveSetting failed", e);
-    return { ok: false, error: "network" };
-  }
+  const text = await res.text();
+  return text ? JSON.parse(text) : [];
 }
 
 export async function loadBookings() {
   try {
-    const [bRes, dRes] = await Promise.all([
-      fetch(SUPABASE_URL + "/rest/v1/bookings?select=date,time,name,email,phone,notes", { headers: sbHeaders() }),
-      fetch(SUPABASE_URL + "/rest/v1/blocked_days?select=date", { headers: sbHeaders() })
+    const [rows, blocked] = await Promise.all([
+      supa("goat_bookings?select=date,slot_time,slot_label,name,email,phone,notes&order=date,slot_time"),
+      supa("goat_blocked_days?select=date"),
     ]);
-    const rows = await bRes.json();
-    const blockedRows = await dRes.json();
     const bookings = {};
-    for (const r of (Array.isArray(rows) ? rows : [])) {
+    for (const r of rows) {
       if (!bookings[r.date]) bookings[r.date] = {};
-      bookings[r.date][r.time] = { name: r.name, email: r.email, phone: r.phone || "", notes: r.notes || "" };
+      bookings[r.date][r.slot_time] = { name: r.name, email: r.email, phone: r.phone, notes: r.notes };
     }
-    const blocked = {};
-    for (const r of (Array.isArray(blockedRows) ? blockedRows : [])) {
-      blocked[r.date] = true;
-    }
-    return { bookings, blocked };
+    const blockedMap = {};
+    for (const b of blocked) blockedMap[b.date] = true;
+    return { bookings, blocked: blockedMap };
   } catch (e) {
     console.error("loadBookings failed", e);
-    return { bookings: lsRead(), blocked: {} };
+    return { bookings: {}, blocked: {} };
   }
 }
 
 export async function bookSlot(opts) {
   try {
-    const res = await fetch(SUPABASE_URL + "/rest/v1/bookings", {
+    await supa("goat_bookings", {
       method: "POST",
-      headers: sbHeaders(),
-      body: JSON.stringify({ date: opts.date, time: opts.slotTime, slot_label: opts.slotLabel, name: opts.name, email: opts.email, phone: opts.phone || "" })
+      prefer: "return=minimal",
+      body: JSON.stringify({
+        date: opts.date,
+        slot_time: opts.slotTime,
+        slot_label: opts.slotLabel,
+        name: opts.name,
+        email: opts.email,
+        phone: opts.phone,
+      }),
     });
-    if (res.status === 409) return { ok: false, error: "taken" };
-    if (!res.ok) return { ok: false, error: "network" };
-    sendNotification(
-      "New Booking - ASCA Goat Practice",
-      "A new slot has been booked.\n\nName: " + opts.name + "\nEmail: " + opts.email + "\nPhone: " + (opts.phone || "Not provided") + "\nDate: " + opts.date + "\nTime: " + opts.slotLabel
-    );
     return { ok: true };
   } catch (e) {
-    console.error("bookSlot failed", e);
-    return { ok: false, error: "network" };
-  }
-}
-
-export async function addBooking(opts) {
-  try {
-    const res = await fetch(SUPABASE_URL + "/rest/v1/bookings", {
-      method: "POST",
-      headers: sbHeaders(),
-      body: JSON.stringify({ date: opts.date, time: opts.slotTime, slot_label: opts.slotLabel, name: opts.name, email: opts.email, phone: opts.phone || "", notes: opts.notes || "" })
-    });
-    if (res.status === 409) return { ok: false, error: "taken" };
-    if (!res.ok) return { ok: false, error: "network" };
-    return { ok: true };
-  } catch (e) {
-    console.error("addBooking failed", e);
-    return { ok: false, error: "network" };
+    if (String(e).includes("duplicate") || String(e).includes("unique")) {
+      return { ok: false, error: "taken" };
+    }
+    return { ok: false, error: String(e) };
   }
 }
 
 export async function cancelSlot(opts) {
   try {
-    const res = await fetch(
-      SUPABASE_URL + "/rest/v1/bookings?date=eq." + encodeURIComponent(opts.date) +
-      "&time=eq." + encodeURIComponent(opts.slotTime) +
-      "&email=eq." + encodeURIComponent(opts.email),
-      { method: "DELETE", headers: sbHeaders() }
-    );
-    if (!res.ok) return { ok: false, error: "network" };
-    sendNotification(
-      "Cancellation - ASCA Goat Practice",
-      "A booking has been cancelled.\n\nEmail: " + opts.email + "\nDate: " + opts.date + "\nTime: " + opts.slotLabel
+    await supa(
+      "goat_bookings?date=eq." + opts.date + "&slot_time=eq." + opts.slotTime + "&email=eq." + encodeURIComponent(opts.email),
+      { method: "DELETE", prefer: "return=minimal" }
     );
     return { ok: true };
   } catch (e) {
-    console.error("cancelSlot failed", e);
-    return { ok: false, error: "network" };
+    return { ok: false, error: String(e) };
   }
 }
 
 export async function adminRemove(opts) {
   try {
-    const res = await fetch(
-      SUPABASE_URL + "/rest/v1/bookings?date=eq." + encodeURIComponent(opts.date) +
-      "&time=eq." + encodeURIComponent(opts.slotTime),
-      { method: "DELETE", headers: sbHeaders() }
+    await supa(
+      "goat_bookings?date=eq." + opts.date + "&slot_time=eq." + opts.slotTime,
+      { method: "DELETE", prefer: "return=minimal" }
     );
-    if (!res.ok) return { ok: false, error: "network" };
     return { ok: true };
   } catch (e) {
-    console.error("adminRemove failed", e);
-    return { ok: false, error: "network" };
+    return { ok: false, error: String(e) };
   }
 }
 
 export async function setDayBlock(opts) {
   try {
     if (opts.blocked) {
-      const res = await fetch(SUPABASE_URL + "/rest/v1/blocked_days", {
-        method: "POST",
-        headers: sbHeaders({ "Prefer": "return=minimal,resolution=ignore-duplicates" }),
-        body: JSON.stringify({ date: opts.date })
-      });
-      if (!res.ok && res.status !== 409) return { ok: false, error: "network" };
+      await supa("goat_blocked_days", { method: "POST", prefer: "return=minimal", body: JSON.stringify({ date: opts.date }) });
     } else {
-      const res = await fetch(
-        SUPABASE_URL + "/rest/v1/blocked_days?date=eq." + encodeURIComponent(opts.date),
-        { method: "DELETE", headers: sbHeaders() }
-      );
-      if (!res.ok) return { ok: false, error: "network" };
+      await supa("goat_blocked_days?date=eq." + opts.date, { method: "DELETE", prefer: "return=minimal" });
     }
     return { ok: true };
   } catch (e) {
-    console.error("setDayBlock failed", e);
-    return { ok: false, error: "network" };
+    return { ok: false, error: String(e) };
   }
 }
+Displaying utils.js.
