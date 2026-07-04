@@ -13,12 +13,15 @@ async function notifyCoaches({ kind, name, email, phone, day, slot }) {
   const message = (kind === "cancellation" ? "A slot was cancelled." : "Someone booked a slot.") +
     "\n\nName: " + name + "\nEmail: " + email + "\nPhone: " + phone + "\nDay: " + day + "\nTime: " + slot;
   try {
-    await fetch("https://api.web3forms.com/submit", {
+    console.log("Sending to Web3Forms, key starts with:", BOOKING_EMAIL_KEY.slice(0,8));
+    const res = await fetch("https://api.web3forms.com/submit", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ access_key: BOOKING_EMAIL_KEY, subject, from_name: "Goat Practice", name, email, phone, day, slot, message, botcheck: "" }),
     });
-  } catch (_) {}
+    const data = await res.json();
+    console.log("Web3Forms response:", JSON.stringify(data));
+  } catch (err) { console.error("Web3Forms error:", err); }
 }
 
 function buildCalendarLink({ name, dateObj, slotTime, slotLabel }) {
