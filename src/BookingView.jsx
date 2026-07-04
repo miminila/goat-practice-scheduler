@@ -67,6 +67,7 @@ export default function BookingView({ mode }) {
   const dayKey = formatDate(DAYS[selectedDay]);
   const dayBookings = bookings[dayKey] || {};
   const dayBlocked = !!blocked[dayKey];
+  const dayHours = (data.hours || {})[dayKey] || null;
   const openCount = dayBlocked ? 0 : DAILY_SLOTS.length - Object.keys(dayBookings).length;
 
   async function confirmBook() {
@@ -157,7 +158,7 @@ export default function BookingView({ mode }) {
             const taken = !!dayBookings[slot.time];
             const now = new Date();
             const isPast = selectedDay === 0 && (now.getHours() * 60 + now.getMinutes()) >= slot.time;
-            const isOutsideHours = !isSlotAvailable(slot.time, dayHours[dayKey]);
+            const isOutsideHours = !isSlotAvailable(slot.time, dayHours);
             const unavailable = taken || isPast || isOutsideHours;
             return (
               <button key={slot.time} disabled={unavailable}
