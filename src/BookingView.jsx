@@ -1,11 +1,3 @@
-
-BookingView.jsx
-
-Page
-1
-/
-1
-100%
 import { useState, useEffect } from "react";
 import {
   DAILY_SLOTS, getDays, formatDate, formatDayLabel, isValidEmail, isValidPhone, formatPhone,
@@ -33,8 +25,8 @@ function buildCalendarLink({ name, dateObj, slotTime, slotLabel }) {
   const start = new Date(dateObj);
   start.setMinutes(start.getMinutes() + slotTime);
   const end = new Date(start); end.setMinutes(end.getMinutes() + 10);
-  const z = (n) => String(n).padStart(2, "0");
-  const fmt = (d) => d.getUTCFullYear() + z(d.getUTCMonth()+1) + z(d.getUTCDate()) + "T" + z(d.getUTCHours()) + z(d.getUTCMinutes()) + "00Z";
+  const z = function(n) { return String(n).padStart(2, "0"); };
+  const fmt = function(d) { return d.getUTCFullYear() + z(d.getUTCMonth()+1) + z(d.getUTCDate()) + "T" + z(d.getUTCHours()) + z(d.getUTCMinutes()) + "00Z"; };
   const ics = [
     "BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Goat Practice//EN","CALSCALE:GREGORIAN",
     "BEGIN:VEVENT","UID:goat-" + Date.now() + "@bookgoatpractice.com",
@@ -66,7 +58,7 @@ export default function BookingView({ mode }) {
   const [cancelResult, setCancelResult] = useState(null);
 
   async function refresh() { setData(await loadBookings()); }
-  useEffect(() => { refresh(); }, []);
+  useEffect(function() { refresh(); }, []);
 
   if (!data) return <div style={styles.loading}>Loading schedule...</div>;
 
@@ -84,23 +76,16 @@ export default function BookingView({ mode }) {
     if (!name) { setModal({ type: "error", msg: "Please enter your name." }); return; }
     if (!isValidEmail(email)) { setModal({ type: "error", msg: "Please enter a valid email address." }); return; }
     if (!isValidPhone(phone)) { setModal({ type: "error", msg: "Please enter a valid 10-digit phone number." }); return; }
-
     const slot = modal.slot;
     setBusy(true);
     const res = await bookSlot({ date: dayKey, slotTime: slot.time, slotLabel: slot.label, name, email, phone });
     setBusy(false);
-
     if (!res.ok) {
-      const msg = res.error === "taken"
-        ? "Sorry - someone just grabbed that slot. Please pick another."
-        : res.error === "blocked"
-        ? "That day is blocked off. Please choose another day."
-        : "Something went wrong. Please try again.";
+      const msg = res.error === "taken" ? "Sorry, someone just grabbed that slot. Please pick another." : "Something went wrong. Please try again.";
       await refresh();
       setModal({ type: "error", msg });
       return;
     }
-
     const dayLabel = formatDayLabel(DAYS[selectedDay], selectedDay);
     notifyCoaches({ kind: "new", name, email, phone: formatPhone(phone), day: dayLabel, slot: slot.label });
     const calLink = buildCalendarLink({ name, dateObj: DAYS[selectedDay], slotTime: slot.time, slotLabel: slot.label });
@@ -115,14 +100,16 @@ export default function BookingView({ mode }) {
     setData(fresh);
     const found = [];
     const today = new Date(); today.setHours(0, 0, 0, 0);
-    for (const [dk, slots] of Object.entries(fresh.bookings)) {
+    for (const dk of Object.keys(fresh.bookings)) {
       const parts = dk.split("-");
       const date = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
       if (date < today) continue;
-      for (const [time, b] of Object.entries(slots)) {
+      const slots = fresh.bookings[dk];
+      for (const time of Object.keys(slots)) {
+        const b = slots[time];
         if (String(b.email).toLowerCase() === email.toLowerCase()) {
-          const slot = DAILY_SLOTS.find(s => String(s.time) === String(time));
-          found.push({ dk, time, label: slot ? slot.label : time, dateStr: dk });
+          const slot = DAILY_SLOTS.find(function(s) { return String(s.time) === String(time); });
+          found.push({ dk, time, label: slot ? slot.label : time });
         }
       }
     }
@@ -142,31 +129,33 @@ export default function BookingView({ mode }) {
   if (mode === "book") return (
     <div style={styles.body}>
       <div style={styles.dayScroll}>
-        {DAYS.map((d, i) => (
-          <button key={i} style={{ ...styles.dayBtn, ...(selectedDay === i ? styles.dayBtnActive : {}) }} onClick={() => setSelectedDay(i)}>
-            <span style={styles.dayBtnTop}>{formatDayLabel(d, i)}</span>
-            <span style={styles.dayBtnSub}>{d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
-          </button>
-        ))}
+        {DAYS.map(function(d, i) {
+          return (
+            <button key={i} style={Object.assign({}, styles.dayBtn, selectedDay === i ? styles.dayBtnActive : {})} onClick={function() { setSelectedDay(i); }}>
+              <span style={styles.dayBtnTop}>{formatDayLabel(d, i)}</span>
+              <span style={styles.dayBtnSub}>{d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+            </button>
+          );
+        })}
       </div>
 
       <div style={styles.legend}>
-        <span style={styles.legendItem}><span style={{ ...styles.dot, background: "#4A7C3F" }} /> Open ({openCount})</span>
-        <span style={styles.legendItem}><span style={{ ...styles.dot, background: "#bbb" }} /> Taken</span>
-        <span style={styles.legendItem}><span style={{ ...styles.dot, background: "#e0c97a", border: "1px dashed #b5922a" }} /> Lunch</span>
+        <span style={styles.legendItem}><span style={Object.assign({}, styles.dot, { background: "#4A7C3F" })} /> Open ({openCount})</span>
+        <span style={styles.legendItem}><span style={Object.assign({}, styles.dot, { background: "#bbb" })} /> Taken</span>
+        <span style={styles.legendItem}><span style={Object.assign({}, styles.dot, { background: "#e0c97a" })} /> Lunch</span>
       </div>
 
       {dayBlocked ? (
-        <div style={styles.blockedBanner}>This day is closed - no practice scheduled. Please pick another day.</div>
+        <div style={styles.blockedBanner}>This day is closed. Please pick another day.</div>
       ) : (
         <div style={styles.grid}>
-          <div style={styles.lunchBar}>Lunch 12:00-1:00 PM - no slots</div>
-          {DAILY_SLOTS.map(slot => {
+          <div style={styles.lunchBar}>Lunch 12:00-1:00 PM</div>
+          {DAILY_SLOTS.map(function(slot) {
             const taken = !!dayBookings[slot.time];
             return (
               <button key={slot.time} disabled={taken}
-                onClick={() => { setForm({ name: "", email: "", phone: "" }); setModal({ type: "confirm", slot }); }}
-                style={{ ...styles.slotBtn, ...(taken ? styles.slotTaken : styles.slotOpen) }}>
+                onClick={function() { setForm({ name: "", email: "", phone: "" }); setModal({ type: "confirm", slot }); }}
+                style={Object.assign({}, styles.slotBtn, taken ? styles.slotTaken : styles.slotOpen)}>
                 <span style={styles.slotTime}>{slot.label}</span>
                 <span style={styles.slotSub}>{taken ? "Taken" : "Available - 10 min"}</span>
               </button>
@@ -176,39 +165,38 @@ export default function BookingView({ mode }) {
       )}
 
       {modal && (
-        <div style={styles.overlay} onClick={() => !busy && setModal(null)}>
-          <div style={styles.modalBox} onClick={e => e.stopPropagation()}>
-            {modal.type === "confirm" && <>
+        <div style={styles.overlay} onClick={function() { if (!busy) setModal(null); }}>
+          <div style={styles.modalBox} onClick={function(e) { e.stopPropagation(); }}>
+            {modal.type === "confirm" && <div>
               <h3 style={styles.modalTitle}>Book {modal.slot.label}</h3>
-              <p style={styles.modalSub}>{formatDayLabel(DAYS[selectedDay], selectedDay)} - {DAYS[selectedDay].toLocaleDateString("en-US", { month: "long", day: "numeric" })}</p>
-              <p style={styles.modalNote}>10-minute practice slot - arrive ready to go</p>
+              <p style={styles.modalSub}>{formatDayLabel(DAYS[selectedDay], selectedDay)}</p>
+              <p style={styles.modalNote}>10-minute practice slot</p>
               <label style={styles.label}>Your name *</label>
-              <input style={styles.input} placeholder="First and last name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+              <input style={styles.input} placeholder="First and last name" value={form.name} onChange={function(e) { setForm(function(f) { return Object.assign({}, f, { name: e.target.value }); }); }} />
               <label style={styles.label}>Email *</label>
-              <input style={styles.input} type="email" placeholder="you@email.com" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
+              <input style={styles.input} type="email" placeholder="you@email.com" value={form.email} onChange={function(e) { setForm(function(f) { return Object.assign({}, f, { email: e.target.value }); }); }} />
               <label style={styles.label}>Phone number *</label>
               <input style={styles.input} type="tel" placeholder="(760) 555-1234"
                 value={formatPhone(form.phone)}
-                onChange={e => setForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, "").slice(0, 10) }))} />
-              <p style={styles.smsNote}>After booking, tap Add to Calendar so your phone reminds you the day before and 1 hour before.</p>
+                onChange={function(e) { setForm(function(f) { return Object.assign({}, f, { phone: e.target.value.replace(/\D/g, "").slice(0, 10) }); }); }} />
+              <p style={styles.smsNote}>After booking tap Add to Calendar so your phone reminds you.</p>
               <div style={styles.btnRow}>
-                <button style={styles.backBtn} disabled={busy} onClick={() => setModal(null)}>Back</button>
+                <button style={styles.backBtn} disabled={busy} onClick={function() { setModal(null); }}>Back</button>
                 <button style={styles.confirmBtn} disabled={busy} onClick={confirmBook}>{busy ? "Booking..." : "Confirm Booking"}</button>
               </div>
-            </>}
-            {modal.type === "success" && <>
-              <div style={styles.bigIcon}>ok</div>
+            </div>}
+            {modal.type === "success" && <div>
+              <div style={styles.bigIcon}>OK</div>
               <h3 style={styles.modalTitle}>You are booked!</h3>
-              <p style={styles.modalNote}>You have got {modal.slotLabel} on {modal.dayLabel}. Add it to your calendar so your phone reminds you - the day before and an hour before.</p>
+              <p style={styles.modalNote}>You have {modal.slotLabel} on {modal.dayLabel}.</p>
               <a href={modal.calLink} download="goat-practice.ics" style={styles.calBtn}>Add to Calendar</a>
-              <button style={styles.doneBtn} onClick={() => setModal(null)}>Done</button>
-            </>}
-            {modal.type === "error" && <>
-              <div style={styles.bigIcon}>!</div>
+              <button style={styles.doneBtn} onClick={function() { setModal(null); }}>Done</button>
+            </div>}
+            {modal.type === "error" && <div>
               <h3 style={styles.modalTitle}>Hold on</h3>
               <p style={styles.modalNote}>{modal.msg}</p>
-              <button style={styles.confirmBtn} onClick={() => setModal(null)}>OK</button>
-            </>}
+              <button style={styles.confirmBtn} onClick={function() { setModal(null); }}>OK</button>
+            </div>}
           </div>
         </div>
       )}
@@ -221,9 +209,9 @@ export default function BookingView({ mode }) {
         <h2 style={styles.cardTitle}>Find my booking</h2>
         <p style={styles.cardHint}>Enter the email you used when you booked.</p>
         <div style={styles.row}>
-          <input style={{ ...styles.input, marginBottom: 0, flex: 1 }} type="email" placeholder="you@email.com"
-            value={cancelEmail} onChange={e => setCancelEmail(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && handleCancelLookup()} />
+          <input style={Object.assign({}, styles.input, { marginBottom: 0, flex: 1 })} type="email" placeholder="you@email.com"
+            value={cancelEmail} onChange={function(e) { setCancelEmail(e.target.value); }}
+            onKeyDown={function(e) { if (e.key === "Enter") handleCancelLookup(); }} />
           <button style={styles.lookupBtn} onClick={handleCancelLookup}>Look up</button>
         </div>
         {cancelResult && cancelResult.error && <p style={styles.errorMsg}>{cancelResult.error}</p>}
@@ -231,15 +219,17 @@ export default function BookingView({ mode }) {
         {cancelResult && cancelResult.bookings && (
           <div style={{ marginTop: 16 }}>
             <p style={{ margin: "0 0 10px", fontSize: 13, fontFamily: "sans-serif", color: "#555" }}>Your upcoming bookings:</p>
-            {cancelResult.bookings.map((b, i) => (
-              <div key={i} style={styles.cancelCard}>
-                <div>
-                  <strong>{b.label}</strong>
-                  <span style={{ marginLeft: 8, fontSize: 13, color: "#777", fontFamily: "sans-serif" }}>{formatDateKey(b.dk)}</span>
+            {cancelResult.bookings.map(function(b, i) {
+              return (
+                <div key={i} style={styles.cancelCard}>
+                  <div>
+                    <strong>{b.label}</strong>
+                    <span style={{ marginLeft: 8, fontSize: 13, color: "#777", fontFamily: "sans-serif" }}>{formatDateKey(b.dk)}</span>
+                  </div>
+                  <button style={styles.cancelBtn} disabled={busy} onClick={function() { doCancel(b.dk, b.time, b.label); }}>Cancel</button>
                 </div>
-                <button style={styles.cancelBtn} disabled={busy} onClick={() => doCancel(b.dk, b.time, b.label)}>Cancel</button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -290,4 +280,3 @@ const styles = {
   cancelCard: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 14px", background: "#F5EFE0", borderRadius: 10, marginBottom: 8 },
   cancelBtn: { padding: "6px 14px", background: "#C0392B", color: "white", border: "none", borderRadius: 7, fontFamily: "sans-serif", fontSize: 13, cursor: "pointer" },
 };
-Displaying BookingView.jsx.
