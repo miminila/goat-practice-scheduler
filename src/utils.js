@@ -1,11 +1,3 @@
-
-utils.js
-
-Page
-1
-/
-1
-100%
 export const SLOT_INTERVAL = 15;
 export const DAY_START = 8 * 60;
 export const DAY_END = 16 * 60;
