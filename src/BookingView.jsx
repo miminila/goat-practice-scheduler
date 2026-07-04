@@ -16,7 +16,7 @@ async function notifyCoaches({ kind, name, email, phone, day, slot }) {
     await fetch("https://api.web3forms.com/submit", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ access_key: BOOKING_EMAIL_KEY, subject, from_name: "Goat Practice", name, email, phone, day, slot, message }),
+      body: JSON.stringify({ access_key: BOOKING_EMAIL_KEY, subject, from_name: "Goat Practice", name, email, phone, day, slot, message, botcheck: "" }),
     });
   } catch (_) {}
 }
