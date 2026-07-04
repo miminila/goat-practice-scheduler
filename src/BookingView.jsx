@@ -1,53 +1,66 @@
+
+BookingView.jsx
+
+Page
+1
+/
+1
+100%
 import { useState, useEffect } from "react";
 import {
-  DAILY_SLOTS, getDays, formatDate, formatDayLabel, isValidEmail,
+  DAILY_SLOTS, getDays, formatDate, formatDayLabel, isValidEmail, isValidPhone, formatPhone,
   loadBookings, bookSlot, cancelSlot
 } from "./utils";
 
-// Booking-notification email to the coaches (Web3Forms — optional, no backend)
 const BOOKING_EMAIL_KEY = import.meta.env.VITE_BOOKING_EMAIL_KEY || "";
-async function notifyCoaches({ kind, name, email, day, slot }) {
+async function notifyCoaches({ kind, name, email, phone, day, slot }) {
   if (!BOOKING_EMAIL_KEY) return;
   const subject = kind === "cancellation"
-    ? `Goat practice CANCELLED — ${name}, ${day} ${slot}`
-    : `New goat practice booking — ${name}, ${day} ${slot}`;
-  const message =
-    `${kind === "cancellation" ? "A slot was cancelled." : "Someone booked a slot."}\n\n` +
-    `Name: ${name}\nEmail: ${email}\nDay: ${day}\nTime: ${slot}`;
+    ? "Goat practice CANCELLED - " + name + ", " + day + " " + slot
+    : "New goat practice booking - " + name + ", " + day + " " + slot;
+  const message = (kind === "cancellation" ? "A slot was cancelled." : "Someone booked a slot.") +
+    "\n\nName: " + name + "\nEmail: " + email + "\nPhone: " + phone + "\nDay: " + day + "\nTime: " + slot;
   try {
     await fetch("https://api.web3forms.com/submit", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ access_key: BOOKING_EMAIL_KEY, subject, from_name: "Goat Practice", name, email, day, slot, message }),
+      body: JSON.stringify({ access_key: BOOKING_EMAIL_KEY, subject, from_name: "Goat Practice", name, email, phone, day, slot, message }),
     });
   } catch (_) {}
 }
 
-// Build a calendar file (.ics) with reminders the day before and 1 hour before
 function buildCalendarLink({ name, dateObj, slotTime, slotLabel }) {
   const start = new Date(dateObj);
   start.setMinutes(start.getMinutes() + slotTime);
   const end = new Date(start); end.setMinutes(end.getMinutes() + 10);
   const z = (n) => String(n).padStart(2, "0");
-  const fmt = (d) => `${d.getUTCFullYear()}${z(d.getUTCMonth() + 1)}${z(d.getUTCDate())}T${z(d.getUTCHours())}${z(d.getUTCMinutes())}00Z`;
+  const fmt = (d) => d.getUTCFullYear() + z(d.getUTCMonth()+1) + z(d.getUTCDate()) + "T" + z(d.getUTCHours()) + z(d.getUTCMinutes()) + "00Z";
   const ics = [
-    "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Goat Practice//EN", "CALSCALE:GREGORIAN",
-    "BEGIN:VEVENT", `UID:goat-${Date.now()}@bookgoatpractice.com`, `DTSTAMP:${fmt(new Date())}`,
-    `DTSTART:${fmt(start)}`, `DTEND:${fmt(end)}`, "SUMMARY:Goat Practice",
-    `DESCRIPTION:Your 10-minute goat practice slot at ${slotLabel}. Booked for ${name}.`,
-    "BEGIN:VALARM", "TRIGGER:-P1D", "ACTION:DISPLAY", "DESCRIPTION:Goat practice tomorrow", "END:VALARM",
-    "BEGIN:VALARM", "TRIGGER:-PT1H", "ACTION:DISPLAY", "DESCRIPTION:Goat practice in 1 hour", "END:VALARM",
-    "END:VEVENT", "END:VCALENDAR",
+    "BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Goat Practice//EN","CALSCALE:GREGORIAN",
+    "BEGIN:VEVENT","UID:goat-" + Date.now() + "@bookgoatpractice.com",
+    "DTSTAMP:" + fmt(new Date()),"DTSTART:" + fmt(start),"DTEND:" + fmt(end),
+    "SUMMARY:Goat Practice",
+    "DESCRIPTION:Your 10-minute goat practice slot at " + slotLabel + ". Booked for " + name + ".",
+    "BEGIN:VALARM","TRIGGER:-P1D","ACTION:DISPLAY","DESCRIPTION:Goat practice tomorrow","END:VALARM",
+    "BEGIN:VALARM","TRIGGER:-PT1H","ACTION:DISPLAY","DESCRIPTION:Goat practice in 1 hour","END:VALARM",
+    "END:VEVENT","END:VCALENDAR",
   ].join("\r\n");
   return "data:text/calendar;charset=utf-8," + encodeURIComponent(ics);
 }
 
+function formatDateKey(dk) {
+  const parts = dk.split("-");
+  if (parts.length !== 3) return dk;
+  const d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+  return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+}
+
 export default function BookingView({ mode }) {
   const DAYS = getDays();
-  const [data, setData] = useState(null); // { bookings, blocked }
+  const [data, setData] = useState(null);
   const [selectedDay, setSelectedDay] = useState(0);
   const [modal, setModal] = useState(null);
-  const [form, setForm] = useState({ name: "", email: "" });
+  const [form, setForm] = useState({ name: "", email: "", phone: "" });
   const [busy, setBusy] = useState(false);
   const [cancelEmail, setCancelEmail] = useState("");
   const [cancelResult, setCancelResult] = useState(null);
@@ -55,7 +68,7 @@ export default function BookingView({ mode }) {
   async function refresh() { setData(await loadBookings()); }
   useEffect(() => { refresh(); }, []);
 
-  if (!data) return <div style={styles.loading}>Loading schedule…</div>;
+  if (!data) return <div style={styles.loading}>Loading schedule...</div>;
 
   const bookings = data.bookings;
   const blocked = data.blocked || {};
@@ -67,27 +80,29 @@ export default function BookingView({ mode }) {
   async function confirmBook() {
     const name = form.name.trim();
     const email = form.email.trim();
+    const phone = form.phone.replace(/\D/g, "");
     if (!name) { setModal({ type: "error", msg: "Please enter your name." }); return; }
     if (!isValidEmail(email)) { setModal({ type: "error", msg: "Please enter a valid email address." }); return; }
+    if (!isValidPhone(phone)) { setModal({ type: "error", msg: "Please enter a valid 10-digit phone number." }); return; }
 
     const slot = modal.slot;
     setBusy(true);
-    const res = await bookSlot({ date: dayKey, slotTime: slot.time, slotLabel: slot.label, name, email });
+    const res = await bookSlot({ date: dayKey, slotTime: slot.time, slotLabel: slot.label, name, email, phone });
     setBusy(false);
 
     if (!res.ok) {
       const msg = res.error === "taken"
-        ? "Sorry — someone just grabbed that slot. Please pick another."
+        ? "Sorry - someone just grabbed that slot. Please pick another."
         : res.error === "blocked"
-        ? "That day was just blocked off. Please choose another day."
-        : "Something went wrong saving your booking. Please try again.";
+        ? "That day is blocked off. Please choose another day."
+        : "Something went wrong. Please try again.";
       await refresh();
       setModal({ type: "error", msg });
       return;
     }
 
     const dayLabel = formatDayLabel(DAYS[selectedDay], selectedDay);
-    notifyCoaches({ kind: "new", name, email, day: dayLabel, slot: slot.label });
+    notifyCoaches({ kind: "new", name, email, phone: formatPhone(phone), day: dayLabel, slot: slot.label });
     const calLink = buildCalendarLink({ name, dateObj: DAYS[selectedDay], slotTime: slot.time, slotLabel: slot.label });
     await refresh();
     setModal({ type: "success", slotLabel: slot.label, dayLabel, calLink });
@@ -101,12 +116,13 @@ export default function BookingView({ mode }) {
     const found = [];
     const today = new Date(); today.setHours(0, 0, 0, 0);
     for (const [dk, slots] of Object.entries(fresh.bookings)) {
-      const date = new Date(dk + "T00:00:00");
+      const parts = dk.split("-");
+      const date = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
       if (date < today) continue;
       for (const [time, b] of Object.entries(slots)) {
         if (String(b.email).toLowerCase() === email.toLowerCase()) {
           const slot = DAILY_SLOTS.find(s => String(s.time) === String(time));
-          found.push({ dk, time, label: slot?.label, dateStr: dk });
+          found.push({ dk, time, label: slot ? slot.label : time, dateStr: dk });
         }
       }
     }
@@ -117,15 +133,12 @@ export default function BookingView({ mode }) {
     setBusy(true);
     await cancelSlot({ date: dk, slotTime: time, email: cancelEmail.trim() });
     setBusy(false);
-    const dateParts = dk.split("-");
-    const date = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
-    const dayLabel = date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
-    notifyCoaches({ kind: "cancellation", name: "(student)", email: cancelEmail.trim(), day: dayLabel, slot: label });
+    const dayLabel = formatDateKey(dk);
+    notifyCoaches({ kind: "cancellation", name: "(student)", email: cancelEmail.trim(), phone: "", day: dayLabel, slot: label });
     await refresh();
-    setCancelResult({ success: `✅ Your ${label} slot on ${dayLabel} has been cancelled. The spot is now open for others.` });
+    setCancelResult({ success: "Your " + label + " slot on " + dayLabel + " has been cancelled. The spot is now open for others." });
   }
 
-  // ── BOOK VIEW ──
   if (mode === "book") return (
     <div style={styles.body}>
       <div style={styles.dayScroll}>
@@ -144,17 +157,18 @@ export default function BookingView({ mode }) {
       </div>
 
       {dayBlocked ? (
-        <div style={styles.blockedBanner}>This day is closed — no practice scheduled. Please pick another day.</div>
+        <div style={styles.blockedBanner}>This day is closed - no practice scheduled. Please pick another day.</div>
       ) : (
         <div style={styles.grid}>
-          <div style={styles.lunchBar}>Lunch 12:00–1:00 PM — no slots</div>
+          <div style={styles.lunchBar}>Lunch 12:00-1:00 PM - no slots</div>
           {DAILY_SLOTS.map(slot => {
             const taken = !!dayBookings[slot.time];
             return (
-              <button key={slot.time} disabled={taken} onClick={() => { setForm({ name: "", email: "" }); setModal({ type: "confirm", slot }); }}
+              <button key={slot.time} disabled={taken}
+                onClick={() => { setForm({ name: "", email: "", phone: "" }); setModal({ type: "confirm", slot }); }}
                 style={{ ...styles.slotBtn, ...(taken ? styles.slotTaken : styles.slotOpen) }}>
                 <span style={styles.slotTime}>{slot.label}</span>
-                <span style={styles.slotSub}>{taken ? "Taken" : "Available · 10 min"}</span>
+                <span style={styles.slotSub}>{taken ? "Taken" : "Available - 10 min"}</span>
               </button>
             );
           })}
@@ -166,27 +180,31 @@ export default function BookingView({ mode }) {
           <div style={styles.modalBox} onClick={e => e.stopPropagation()}>
             {modal.type === "confirm" && <>
               <h3 style={styles.modalTitle}>Book {modal.slot.label}</h3>
-              <p style={styles.modalSub}>{formatDayLabel(DAYS[selectedDay], selectedDay)} · {DAYS[selectedDay].toLocaleDateString("en-US", { month: "long", day: "numeric" })}</p>
-              <p style={styles.modalNote}>10-minute practice slot · arrive ready to go</p>
-              <label style={styles.label}>Your name</label>
+              <p style={styles.modalSub}>{formatDayLabel(DAYS[selectedDay], selectedDay)} - {DAYS[selectedDay].toLocaleDateString("en-US", { month: "long", day: "numeric" })}</p>
+              <p style={styles.modalNote}>10-minute practice slot - arrive ready to go</p>
+              <label style={styles.label}>Your name *</label>
               <input style={styles.input} placeholder="First and last name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
-              <label style={styles.label}>Email <span style={{ color: "#C0392B" }}>*</span></label>
+              <label style={styles.label}>Email *</label>
               <input style={styles.input} type="email" placeholder="you@email.com" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
-              <p style={styles.smsNote}>📅 After booking, tap "Add to Calendar" and your phone will remind you the day before and 1 hour before.</p>
+              <label style={styles.label}>Phone number *</label>
+              <input style={styles.input} type="tel" placeholder="(760) 555-1234"
+                value={formatPhone(form.phone)}
+                onChange={e => setForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, "").slice(0, 10) }))} />
+              <p style={styles.smsNote}>After booking, tap Add to Calendar so your phone reminds you the day before and 1 hour before.</p>
               <div style={styles.btnRow}>
                 <button style={styles.backBtn} disabled={busy} onClick={() => setModal(null)}>Back</button>
-                <button style={styles.confirmBtn} disabled={busy} onClick={confirmBook}>{busy ? "Booking…" : "Confirm Booking"}</button>
+                <button style={styles.confirmBtn} disabled={busy} onClick={confirmBook}>{busy ? "Booking..." : "Confirm Booking"}</button>
               </div>
             </>}
             {modal.type === "success" && <>
-              <div style={styles.bigIcon}>✅</div>
-              <h3 style={styles.modalTitle}>You're booked!</h3>
-              <p style={styles.modalNote}>You've got {modal.slotLabel} on {modal.dayLabel}. Add it to your calendar so your phone reminds you — the day before and an hour before.</p>
-              <a href={modal.calLink} download="goat-practice.ics" style={styles.calBtn}>📅 Add to Calendar</a>
+              <div style={styles.bigIcon}>ok</div>
+              <h3 style={styles.modalTitle}>You are booked!</h3>
+              <p style={styles.modalNote}>You have got {modal.slotLabel} on {modal.dayLabel}. Add it to your calendar so your phone reminds you - the day before and an hour before.</p>
+              <a href={modal.calLink} download="goat-practice.ics" style={styles.calBtn}>Add to Calendar</a>
               <button style={styles.doneBtn} onClick={() => setModal(null)}>Done</button>
             </>}
             {modal.type === "error" && <>
-              <div style={styles.bigIcon}>⚠️</div>
+              <div style={styles.bigIcon}>!</div>
               <h3 style={styles.modalTitle}>Hold on</h3>
               <p style={styles.modalNote}>{modal.msg}</p>
               <button style={styles.confirmBtn} onClick={() => setModal(null)}>OK</button>
@@ -197,7 +215,6 @@ export default function BookingView({ mode }) {
     </div>
   );
 
-  // ── CANCEL VIEW ──
   return (
     <div style={styles.body}>
       <div style={styles.card}>
@@ -209,17 +226,16 @@ export default function BookingView({ mode }) {
             onKeyDown={e => e.key === "Enter" && handleCancelLookup()} />
           <button style={styles.lookupBtn} onClick={handleCancelLookup}>Look up</button>
         </div>
-        {cancelResult?.error && <p style={styles.errorMsg}>{cancelResult.error}</p>}
-        {cancelResult?.success && <p style={styles.successMsg}>{cancelResult.success}</p>}
-        {cancelResult?.bookings && (
+        {cancelResult && cancelResult.error && <p style={styles.errorMsg}>{cancelResult.error}</p>}
+        {cancelResult && cancelResult.success && <p style={styles.successMsg}>{cancelResult.success}</p>}
+        {cancelResult && cancelResult.bookings && (
           <div style={{ marginTop: 16 }}>
             <p style={{ margin: "0 0 10px", fontSize: 13, fontFamily: "sans-serif", color: "#555" }}>Your upcoming bookings:</p>
             {cancelResult.bookings.map((b, i) => (
               <div key={i} style={styles.cancelCard}>
-                <div><strong>{b.label}</strong>
-                  <span style={{ marginLeft: 8, fontSize: 13, color: "#777", fontFamily: "sans-serif" }}>
-                    {new Date(b.dateStr + "T12:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
-                  </span>
+                <div>
+                  <strong>{b.label}</strong>
+                  <span style={{ marginLeft: 8, fontSize: 13, color: "#777", fontFamily: "sans-serif" }}>{formatDateKey(b.dk)}</span>
                 </div>
                 <button style={styles.cancelBtn} disabled={busy} onClick={() => doCancel(b.dk, b.time, b.label)}>Cancel</button>
               </div>
@@ -242,7 +258,7 @@ const styles = {
   legend: { display: "flex", gap: 16, marginBottom: 14, flexWrap: "wrap" },
   legendItem: { display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontFamily: "sans-serif", color: "#555" },
   dot: { display: "inline-block", width: 10, height: 10, borderRadius: "50%", flexShrink: 0 },
-  blockedBanner: { background: "#fdecea", border: "1px solid #f5c6c2", borderRadius: 10, padding: "16px", fontFamily: "sans-serif", fontSize: 14, color: "#922b21", textAlign: "center" },
+  blockedBanner: { background: "#fdecea", border: "1px solid #f5c6c2", borderRadius: 10, padding: 16, fontFamily: "sans-serif", fontSize: 14, color: "#922b21", textAlign: "center" },
   grid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(145px, 1fr))", gap: 8 },
   lunchBar: { gridColumn: "1/-1", background: "#EDE0C4", border: "1px dashed #C9A96E", borderRadius: 8, padding: "8px 14px", fontSize: 13, color: "#7a5c2e", fontFamily: "sans-serif", textAlign: "center" },
   slotBtn: { display: "flex", flexDirection: "column", alignItems: "flex-start", padding: "10px 14px", border: "none", borderRadius: 10, cursor: "pointer" },
@@ -274,3 +290,4 @@ const styles = {
   cancelCard: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 14px", background: "#F5EFE0", borderRadius: 10, marginBottom: 8 },
   cancelBtn: { padding: "6px 14px", background: "#C0392B", color: "white", border: "none", borderRadius: 7, fontFamily: "sans-serif", fontSize: 13, cursor: "pointer" },
 };
+Displaying BookingView.jsx.
