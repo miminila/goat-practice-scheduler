@@ -106,6 +106,7 @@ export default function AdminView() {
   const roster = DAILY_SLOTS.map(slot => ({ slot, booking: dayBookings[slot.time] || null, available: isSlotAvailable(slot.time, dayHours) }));
   const totalBooked = DAYS.reduce((sum, d) => sum + Object.keys(bookings[formatDate(d)] || {}).length, 0);
   const hasCustomHours = !!dayHours;
+  const nowMinutes = selectedDay === 0 ? (new Date().getHours() * 60 + new Date().getMinutes()) : -1;
 
   return (
     <div style={styles.body}>
@@ -158,7 +159,7 @@ export default function AdminView() {
           <div style={styles.hoursSection}>
             <div style={styles.hoursSectionTitle}>Morning window</div>
             <div style={styles.hoursRow}>
-              <TimeSelect value={hoursForm.morning_start} onChange={v => setHoursForm(f => ({ ...f, morning_start: v, morning_end: f.morning_end != null && v != null && f.morning_end <= v ? null : f.morning_end }))} placeholder="Start time" />
+              <TimeSelect value={hoursForm.morning_start} onChange={v => setHoursForm(f => ({ ...f, morning_start: v, morning_end: f.morning_end != null && v != null && f.morning_end <= v ? null : f.morning_end }))} placeholder="Start time" minValue={nowMinutes > 0 ? nowMinutes : null} />
               <span style={styles.hoursTo}>to</span>
               <TimeSelect value={hoursForm.morning_end} onChange={v => setHoursForm(f => ({ ...f, morning_end: v }))} placeholder="End time" minValue={hoursForm.morning_start} />
             </div>
@@ -206,12 +207,13 @@ export default function AdminView() {
         </div>
         {roster.map(({ slot, booking, available }) => {
           const isLunch = slot.time >= LUNCH_START && slot.time < LUNCH_END;
-          const bg = booking ? "#fff" : !available ? "#f5f0e8" : "#f9faf9";
+          const isPast = nowMinutes >= 0 && slot.time < nowMinutes;
+          const bg = booking ? "#fff" : isPast ? "#f5f0e8" : !available ? "#f5f0e8" : "#f9faf9";
           return (
             <div key={slot.time} style={{ ...styles.rosterRow, background: bg }}>
-              <span style={styles.colTime}><strong style={{ color: !available && !booking ? "#bbb" : "#2c1a0e" }}>{slot.label}</strong></span>
+              <span style={styles.colTime}><strong style={{ color: (!available || isPast) && !booking ? "#bbb" : "#2c1a0e" }}>{slot.label}</strong></span>
               <span style={styles.colName}>
-                {booking ? booking.name : !available ? <span style={styles.closedLabel}>{isLunch ? "lunch" : "closed"}</span> : <span style={styles.openLabel}>open</span>}
+                {booking ? booking.name : isPast ? <span style={styles.closedLabel}>past</span> : !available ? <span style={styles.closedLabel}>{isLunch ? "lunch" : "closed"}</span> : <span style={styles.openLabel}>open</span>}
               </span>
               <span style={styles.colPhone}>{booking ? booking.phone || "" : ""}</span>
               <span style={styles.colEmail}>{booking ? booking.email : ""}</span>
