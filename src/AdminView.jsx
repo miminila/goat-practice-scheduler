@@ -136,4 +136,3 @@ const styles = {
   openLabel: { color: "#bbb", fontStyle: "italic" },
   removeBtn: { padding: "4px 10px", background: "#C0392B", color: "white", border: "none", borderRadius: 6, fontFamily: "sans-serif", fontSize: 12, cursor: "pointer" },
 };
-Displaying ADMINVIEW-CORRECT.jsx.
