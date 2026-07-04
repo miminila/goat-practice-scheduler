@@ -1,11 +1,3 @@
-
-AdminView.jsx
-
-Page
-1
-/
-1
-100%
 import { useState, useEffect } from "react";
 import { DAILY_SLOTS, getDays, formatDate, formatDayLabel, loadBookings, adminRemove, setDayBlock } from "./utils";
 
@@ -36,16 +28,16 @@ export default function AdminView() {
     await setDayBlock({ date: dayKey, blocked: !isBlocked });
     await refresh();
     setBusy(false);
-    showToast(isBlocked ? "Day reopened - slots are bookable again." : "Day blocked - no new bookings allowed.");
+    showToast(isBlocked ? "Day reopened." : "Day blocked.");
   }
 
   async function removeBooking(time, name, label) {
-    if (!window.confirm("Remove " + name + "'s booking at " + label + "?")) return;
+    if (!window.confirm("Remove " + name + " from " + label + "?")) return;
     setBusy(true);
     await adminRemove({ date: dayKey, slotTime: time });
     await refresh();
     setBusy(false);
-    showToast(name + "'s slot removed.");
+    showToast(name + " removed.");
   }
 
   const roster = DAILY_SLOTS.map(slot => ({ slot, booking: dayBookings[slot.time] || null }));
@@ -56,9 +48,9 @@ export default function AdminView() {
       {toast && <div style={styles.toast}>{toast}</div>}
 
       <div style={styles.summaryRow}>
-        <div style={styles.summaryCard}><span style={styles.summaryNum}>{totalBooked}</span><span style={styles.summaryLabel}>Booked - 10 days</span></div>
-        <div style={styles.summaryCard}><span style={styles.summaryNum}>{bookedCount}</span><span style={styles.summaryLabel}>Booked this day</span></div>
-        <div style={styles.summaryCard}><span style={styles.summaryNum}>{openCount}</span><span style={styles.summaryLabel}>Open this day</span></div>
+        <div style={styles.summaryCard}><span style={styles.summaryNum}>{totalBooked}</span><span style={styles.summaryLabel}>Booked 10 days</span></div>
+        <div style={styles.summaryCard}><span style={styles.summaryNum}>{bookedCount}</span><span style={styles.summaryLabel}>Booked today</span></div>
+        <div style={styles.summaryCard}><span style={styles.summaryNum}>{openCount}</span><span style={styles.summaryLabel}>Open today</span></div>
       </div>
 
       <div style={styles.dayScroll}>
@@ -88,7 +80,7 @@ export default function AdminView() {
         </div>
       </div>
 
-      {isBlocked && <div style={styles.blockedBanner}>This day is blocked - students cannot book. Click Unblock Day to reopen.</div>}
+      {isBlocked && <div style={styles.blockedBanner}>This day is blocked. Click Unblock Day to reopen.</div>}
 
       <div style={styles.rosterWrap}>
         <div style={styles.rosterHeader}>
@@ -96,7 +88,6 @@ export default function AdminView() {
           <span style={styles.colName}>Student</span>
           <span style={styles.colPhone}>Phone</span>
           <span style={styles.colEmail}>Email</span>
-          <span style={styles.colNotes}>Notes</span>
           <span style={styles.colAct}></span>
         </div>
         {roster.map(({ slot, booking }) => (
@@ -105,7 +96,6 @@ export default function AdminView() {
             <span style={styles.colName}>{booking ? booking.name : <span style={styles.openLabel}>open</span>}</span>
             <span style={styles.colPhone}>{booking ? booking.phone || "" : ""}</span>
             <span style={styles.colEmail}>{booking ? booking.email : ""}</span>
-            <span style={styles.colNotes}>{booking ? booking.notes || "" : ""}</span>
             <span style={styles.colAct}>{booking && <button style={styles.removeBtn} disabled={busy} onClick={() => removeBooking(slot.time, booking.name, slot.label)}>Remove</button>}</span>
           </div>
         ))}
@@ -117,11 +107,11 @@ export default function AdminView() {
 const styles = {
   body: { padding: "20px 16px", maxWidth: 760, margin: "0 auto" },
   loading: { padding: 40, textAlign: "center", fontFamily: "sans-serif", color: "#888" },
-  toast: { position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: "#3B2008", color: "#F5D78E", padding: "12px 24px", borderRadius: 10, fontFamily: "sans-serif", fontSize: 14, zIndex: 200, boxShadow: "0 4px 16px rgba(0,0,0,0.2)" },
+  toast: { position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: "#3B2008", color: "#F5D78E", padding: "12px 24px", borderRadius: 10, fontFamily: "sans-serif", fontSize: 14, zIndex: 200 },
   summaryRow: { display: "flex", gap: 10, marginBottom: 20 },
   summaryCard: { flex: 1, background: "white", borderRadius: 12, padding: "14px 16px", boxShadow: "0 2px 8px rgba(0,0,0,0.07)", display: "flex", flexDirection: "column", gap: 4 },
   summaryNum: { fontSize: 28, fontWeight: "bold", color: "#3B2008" },
-  summaryLabel: { fontSize: 11, fontFamily: "sans-serif", color: "#888", textTransform: "uppercase", letterSpacing: "0.4px" },
+  summaryLabel: { fontSize: 11, fontFamily: "sans-serif", color: "#888", textTransform: "uppercase" },
   dayScroll: { display: "flex", gap: 8, overflowX: "auto", paddingBottom: 8, marginBottom: 16, scrollbarWidth: "none" },
   dayBtn: { flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", padding: "8px 14px", border: "2px solid #C9A96E", borderRadius: 10, background: "white", cursor: "pointer", minWidth: 80, gap: 2 },
   dayBtnActive: { background: "#3B2008", borderColor: "#3B2008", color: "#F5D78E" },
@@ -142,9 +132,8 @@ const styles = {
   colName: { flex: 1.2, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" },
   colPhone: { width: 130, flexShrink: 0, fontSize: 13, color: "#555" },
   colEmail: { flex: 1.4, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", fontSize: 13, color: "#555" },
-  colNotes: { flex: 1, minWidth: 0, fontSize: 13, color: "#777" },
   colAct: { width: 80, flexShrink: 0, textAlign: "right" },
   openLabel: { color: "#bbb", fontStyle: "italic" },
   removeBtn: { padding: "4px 10px", background: "#C0392B", color: "white", border: "none", borderRadius: 6, fontFamily: "sans-serif", fontSize: 12, cursor: "pointer" },
 };
-Displaying AdminView.jsx.
+Displaying ADMINVIEW-CORRECT.jsx.
