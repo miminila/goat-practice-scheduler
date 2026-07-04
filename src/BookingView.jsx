@@ -157,7 +157,7 @@ export default function BookingView({ mode }) {
             const taken = !!dayBookings[slot.time];
             const now = new Date();
             const isPast = selectedDay === 0 && (now.getHours() * 60 + now.getMinutes()) >= slot.time;
-            const isOutsideHours = !isSlotInWindows(slot.time, dayHours[dayKey]);
+            const isOutsideHours = !isSlotAvailable(slot.time, dayHours[dayKey]);
             const unavailable = taken || isPast || isOutsideHours;
             return (
               <button key={slot.time} disabled={unavailable}
