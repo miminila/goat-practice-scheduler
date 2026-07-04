@@ -9,7 +9,6 @@ export function generateSlots() {
   const slots = [];
   let t = DAY_START;
   while (t + 10 <= DAY_END) {
-    if (t >= LUNCH_START && t < LUNCH_END) { t += SLOT_INTERVAL; continue; }
     const h = Math.floor(t / 60);
     const m = t % 60;
     const period = h >= 12 ? "PM" : "AM";
@@ -61,7 +60,24 @@ export function formatPhone(raw) {
   return "(" + digits.slice(0, 3) + ") " + digits.slice(3, 6) + "-" + digits.slice(6, 10);
 }
 
-// ─── SUPABASE CONFIG ──────────────────────────────────────────────────────────
+export function isSlotAvailable(slotTime, hours) {
+  if (!hours) {
+    const inLunch = slotTime >= LUNCH_START && slotTime < LUNCH_END;
+    return !inLunch;
+  }
+  const lunchBlocked = hours.lunch_blocked !== false;
+  if (lunchBlocked && slotTime >= LUNCH_START && slotTime < LUNCH_END) return false;
+  const hasMorning = hours.morning_start != null && hours.morning_end != null;
+  const hasAfternoon = hours.afternoon_start != null && hours.afternoon_end != null;
+  if (!hasMorning && !hasAfternoon) {
+    return !(lunchBlocked && slotTime >= LUNCH_START && slotTime < LUNCH_END);
+  }
+  const inMorning = hasMorning && slotTime >= hours.morning_start && slotTime < hours.morning_end;
+  const inAfternoon = hasAfternoon && slotTime >= hours.afternoon_start && slotTime < hours.afternoon_end;
+  return inMorning || inAfternoon;
+}
+
+// ─── SUPABASE ─────────────────────────────────────────────────────────────────
 const SUPA_URL = "https://kafxlwboepfekybipzog.supabase.co";
 const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImthZnhsd2JvZXBmZWt5Ymlwem9nIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1NzMwMDMsImV4cCI6MjA5ODE0OTAwM30.RsuH-GXnv63_vRQ6-veg3o8xa_gBYPqu7KbYGAjJeXA";
 
@@ -75,19 +91,17 @@ async function supa(path, opts) {
     },
     ...opts,
   });
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(err);
-  }
+  if (!res.ok) { const err = await res.text(); throw new Error(err); }
   const text = await res.text();
   return text ? JSON.parse(text) : [];
 }
 
 export async function loadBookings() {
   try {
-    const [rows, blocked] = await Promise.all([
+    const [rows, blocked, hours] = await Promise.all([
       supa("goat_bookings?select=date,slot_time,slot_label,name,email,phone,notes&order=date,slot_time"),
       supa("goat_blocked_days?select=date"),
+      supa("goat_day_hours?select=date,morning_start,morning_end,afternoon_start,afternoon_end,lunch_blocked"),
     ]);
     const bookings = {};
     for (const r of rows) {
@@ -96,10 +110,12 @@ export async function loadBookings() {
     }
     const blockedMap = {};
     for (const b of blocked) blockedMap[b.date] = true;
-    return { bookings, blocked: blockedMap };
+    const hoursMap = {};
+    for (const h of hours) hoursMap[h.date] = h;
+    return { bookings, blocked: blockedMap, hours: hoursMap };
   } catch (e) {
     console.error("loadBookings failed", e);
-    return { bookings: {}, blocked: {} };
+    return { bookings: {}, blocked: {}, hours: {} };
   }
 }
 
@@ -108,46 +124,27 @@ export async function bookSlot(opts) {
     await supa("goat_bookings", {
       method: "POST",
       prefer: "return=minimal",
-      body: JSON.stringify({
-        date: opts.date,
-        slot_time: opts.slotTime,
-        slot_label: opts.slotLabel,
-        name: opts.name,
-        email: opts.email,
-        phone: opts.phone,
-      }),
+      body: JSON.stringify({ date: opts.date, slot_time: opts.slotTime, slot_label: opts.slotLabel, name: opts.name, email: opts.email, phone: opts.phone }),
     });
     return { ok: true };
   } catch (e) {
-    if (String(e).includes("duplicate") || String(e).includes("unique")) {
-      return { ok: false, error: "taken" };
-    }
+    if (String(e).includes("duplicate") || String(e).includes("unique")) return { ok: false, error: "taken" };
     return { ok: false, error: String(e) };
   }
 }
 
 export async function cancelSlot(opts) {
   try {
-    await supa(
-      "goat_bookings?date=eq." + opts.date + "&slot_time=eq." + opts.slotTime + "&email=eq." + encodeURIComponent(opts.email),
-      { method: "DELETE", prefer: "return=minimal" }
-    );
+    await supa("goat_bookings?date=eq." + opts.date + "&slot_time=eq." + opts.slotTime + "&email=eq." + encodeURIComponent(opts.email), { method: "DELETE", prefer: "return=minimal" });
     return { ok: true };
-  } catch (e) {
-    return { ok: false, error: String(e) };
-  }
+  } catch (e) { return { ok: false, error: String(e) }; }
 }
 
 export async function adminRemove(opts) {
   try {
-    await supa(
-      "goat_bookings?date=eq." + opts.date + "&slot_time=eq." + opts.slotTime,
-      { method: "DELETE", prefer: "return=minimal" }
-    );
+    await supa("goat_bookings?date=eq." + opts.date + "&slot_time=eq." + opts.slotTime, { method: "DELETE", prefer: "return=minimal" });
     return { ok: true };
-  } catch (e) {
-    return { ok: false, error: String(e) };
-  }
+  } catch (e) { return { ok: false, error: String(e) }; }
 }
 
 export async function setDayBlock(opts) {
@@ -158,7 +155,35 @@ export async function setDayBlock(opts) {
       await supa("goat_blocked_days?date=eq." + opts.date, { method: "DELETE", prefer: "return=minimal" });
     }
     return { ok: true };
-  } catch (e) {
-    return { ok: false, error: String(e) };
+  } catch (e) { return { ok: false, error: String(e) }; }
+}
+
+export async function saveDayHours(date, hours) {
+  try {
+    await supa("goat_day_hours", {
+      method: "POST",
+      prefer: "resolution=merge-duplicates,return=minimal",
+      body: JSON.stringify({ date, ...hours }),
+    });
+    return { ok: true };
+  } catch (e) { return { ok: false, error: String(e) }; }
+}
+
+export async function clearDayHours(date) {
+  try {
+    await supa("goat_day_hours?date=eq." + date, { method: "DELETE", prefer: "return=minimal" });
+    return { ok: true };
+  } catch (e) { return { ok: false, error: String(e) }; }
+}
+
+export function makeTimeOptions() {
+  const opts = [];
+  for (let t = DAY_START; t <= DAY_END; t += SLOT_INTERVAL) {
+    const h = Math.floor(t / 60);
+    const m = t % 60;
+    const period = h >= 12 ? "PM" : "AM";
+    const hour = h > 12 ? h - 12 : h === 0 ? 12 : h;
+    opts.push({ value: t, label: hour + ":" + m.toString().padStart(2, "0") + " " + period });
   }
+  return opts;
 }
