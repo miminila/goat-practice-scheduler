@@ -61,6 +61,7 @@ export function formatPhone(raw) {
   return "(" + digits.slice(0, 3) + ") " + digits.slice(3, 6) + "-" + digits.slice(6, 10);
 }
 
+// ─── SUPABASE CONFIG ──────────────────────────────────────────────────────────
 const SUPA_URL = "https://kafxlwboepfekybipzog.supabase.co";
 const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImthZnhsd2JvZXBmZWt5Ymlwem9nIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1NzMwMDMsImV4cCI6MjA5ODE0OTAwM30.RsuH-GXnv63_vRQ6-veg3o8xa_gBYPqu7KbYGAjJeXA";
 
