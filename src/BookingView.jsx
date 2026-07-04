@@ -4,7 +4,7 @@ import {
   loadBookings, bookSlot, cancelSlot, isSlotAvailable
 } from "./utils";
 
-const BOOKING_EMAIL_KEY = import.meta.env.VITE_BOOKING_EMAIL_KEY || "041fdbc9-cf60-4674-a2e4-1ffa01ee0ab7";
+const BOOKING_EMAIL_KEY = "041fdbc9-cf60-4674-a2e4-1ffa01ee0ab7";
 async function notifyCoaches({ kind, name, email, phone, day, slot }) {
   if (!BOOKING_EMAIL_KEY) return;
   const subject = kind === "cancellation"
