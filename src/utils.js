@@ -32,13 +32,46 @@ export function getDays() {
   return days;
 }
 
+// Fallback window used only if no practice dates have been set in Coach View yet.
+export function defaultDateRange() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const end = new Date(today);
+  end.setDate(today.getDate() + (DAYS_SHOWN - 1));
+  return { startDate: formatDate(today), endDate: formatDate(end) };
+}
+
+// Builds the list of dates to show, based on the admin-set start/end date.
+export function getDaysInRange(startDateStr, endDateStr) {
+  const parse = (s) => {
+    const [y, m, d] = s.split("-").map(Number);
+    return new Date(y, m - 1, d);
+  };
+  const start = parse(startDateStr);
+  const end = parse(endDateStr);
+  const days = [];
+  let cur = new Date(start);
+  let guard = 0;
+  while (cur <= end && guard < 60) {
+    days.push(new Date(cur));
+    cur.setDate(cur.getDate() + 1);
+    guard++;
+  }
+  if (days.length === 0) days.push(new Date(start));
+  return days;
+}
+
 export function formatDate(d) {
   return d.toISOString().split("T")[0];
 }
 
-export function formatDayLabel(d, i) {
-  if (i === 0) return "Today";
-  if (i === 1) return "Tomorrow";
+export function formatDayLabel(d) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const dOnly = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const diff = Math.round((dOnly - today) / 86400000);
+  if (diff === 0) return "Today";
+  if (diff === 1) return "Tomorrow";
   return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 }
 
@@ -98,10 +131,11 @@ async function supa(path, opts) {
 
 export async function loadBookings() {
   try {
-    const [rows, blocked, hours] = await Promise.all([
+    const [rows, blocked, hours, settingsRows] = await Promise.all([
       supa("goat_bookings?select=date,slot_time,slot_label,name,email,phone,notes&order=date,slot_time"),
       supa("goat_blocked_days?select=date"),
       supa("goat_day_hours?select=date,morning_start,morning_end,afternoon_start,afternoon_end,lunch_blocked"),
+      supa("goat_settings?select=start_date,end_date&limit=1"),
     ]);
     const bookings = {};
     for (const r of rows) {
@@ -112,10 +146,26 @@ export async function loadBookings() {
     for (const b of blocked) blockedMap[b.date] = true;
     const hoursMap = {};
     for (const h of hours) hoursMap[h.date] = h;
-    return { bookings, blocked: blockedMap, hours: hoursMap };
+    const settings = (settingsRows && settingsRows.length && settingsRows[0].start_date && settingsRows[0].end_date)
+      ? { startDate: settingsRows[0].start_date, endDate: settingsRows[0].end_date }
+      : defaultDateRange();
+    return { bookings, blocked: blockedMap, hours: hoursMap, settings };
   } catch (e) {
     console.error("loadBookings failed", e);
-    return { bookings: {}, blocked: {}, hours: {} };
+    return { bookings: {}, blocked: {}, hours: {}, settings: defaultDateRange() };
+  }
+}
+
+export async function saveSettings(startDate, endDate) {
+  try {
+    await supa("goat_settings", {
+      method: "POST",
+      prefer: "resolution=merge-duplicates,return=minimal",
+      body: JSON.stringify({ id: 1, start_date: startDate, end_date: endDate }),
+    });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e) };
   }
 }
 
