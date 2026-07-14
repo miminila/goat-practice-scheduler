@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import {
-  DAILY_SLOTS, getDays, formatDate, formatDayLabel, isValidEmail, isValidPhone, formatPhone,
-  loadBookings, bookSlot, cancelSlot, isSlotAvailable
+  DAILY_SLOTS, formatDate, formatDayLabel, isValidEmail, isValidPhone, formatPhone,
+  loadBookings, bookSlot, cancelSlot, isSlotAvailable, getDaysInRange, defaultDateRange
 } from "./utils";
 
 const BOOKING_EMAIL_KEY = "041fdbc9-cf60-4674-a2e4-1ffa01ee0ab7";
@@ -48,7 +48,6 @@ function formatDateKey(dk) {
 }
 
 export default function BookingView({ mode }) {
-  const DAYS = getDays();
   const [data, setData] = useState(null);
   const [selectedDay, setSelectedDay] = useState(0);
   const [modal, setModal] = useState(null);
@@ -57,6 +56,10 @@ export default function BookingView({ mode }) {
   const [cancelEmail, setCancelEmail] = useState("");
   const [cancelResult, setCancelResult] = useState(null);
 
+  const settings = (data && data.settings) || defaultDateRange();
+  const DAYS = getDaysInRange(settings.startDate, settings.endDate);
+  const selectedDayIndex = Math.min(selectedDay, DAYS.length - 1);
+
   async function refresh() { setData(await loadBookings()); }
   useEffect(() => { refresh(); }, []);
 
@@ -64,11 +67,12 @@ export default function BookingView({ mode }) {
 
   const bookings = data.bookings;
   const blocked = data.blocked || {};
-  const dayKey = formatDate(DAYS[selectedDay]);
+  const dayKey = formatDate(DAYS[selectedDayIndex]);
   const dayBookings = bookings[dayKey] || {};
   const dayBlocked = !!blocked[dayKey];
   const dayHours = (data.hours || {})[dayKey] || null;
   const openCount = dayBlocked ? 0 : DAILY_SLOTS.length - Object.keys(dayBookings).length;
+  const isViewingToday = dayKey === formatDate(new Date());
 
   async function confirmBook() {
     const name = form.name.trim();
@@ -94,9 +98,9 @@ export default function BookingView({ mode }) {
       return;
     }
 
-    const dayLabel = formatDayLabel(DAYS[selectedDay], selectedDay);
+    const dayLabel = formatDayLabel(DAYS[selectedDayIndex]);
     notifyCoaches({ kind: "new", name, email, phone: formatPhone(phone), day: dayLabel, slot: slot.label });
-    const calLink = buildCalendarLink({ name, dateObj: DAYS[selectedDay], slotTime: slot.time, slotLabel: slot.label });
+    const calLink = buildCalendarLink({ name, dateObj: DAYS[selectedDayIndex], slotTime: slot.time, slotLabel: slot.label });
     await refresh();
     setModal({ type: "success", slotLabel: slot.label, dayLabel, calLink });
   }
@@ -136,7 +140,7 @@ export default function BookingView({ mode }) {
     <div style={styles.body}>
       <div style={styles.dayScroll}>
         {DAYS.map((d, i) => (
-          <button key={i} style={{ ...styles.dayBtn, ...(selectedDay === i ? styles.dayBtnActive : {}) }} onClick={() => setSelectedDay(i)}>
+          <button key={i} style={{ ...styles.dayBtn, ...(selectedDayIndex === i ? styles.dayBtnActive : {}) }} onClick={() => setSelectedDay(i)}>
             <span style={styles.dayBtnTop}>{formatDayLabel(d, i)}</span>
             <span style={styles.dayBtnSub}>{d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
           </button>
@@ -157,7 +161,7 @@ export default function BookingView({ mode }) {
           {DAILY_SLOTS.map(slot => {
             const taken = !!dayBookings[slot.time];
             const now = new Date();
-            const isPast = selectedDay === 0 && (now.getHours() * 60 + now.getMinutes()) >= slot.time;
+            const isPast = isViewingToday && (now.getHours() * 60 + now.getMinutes()) >= slot.time;
             const isOutsideHours = !isSlotAvailable(slot.time, dayHours);
             const unavailable = taken || isPast || isOutsideHours;
             return (
@@ -177,7 +181,7 @@ export default function BookingView({ mode }) {
           <div style={styles.modalBox} onClick={e => e.stopPropagation()}>
             {modal.type === "confirm" && <>
               <h3 style={styles.modalTitle}>Book {modal.slot.label}</h3>
-              <p style={styles.modalSub}>{formatDayLabel(DAYS[selectedDay], selectedDay)} · {DAYS[selectedDay].toLocaleDateString("en-US", { month: "long", day: "numeric" })}</p>
+              <p style={styles.modalSub}>{formatDayLabel(DAYS[selectedDayIndex])} · {DAYS[selectedDayIndex].toLocaleDateString("en-US", { month: "long", day: "numeric" })}</p>
               <p style={styles.modalNote}>10-minute practice slot · arrive ready to go</p>
               <label style={styles.label}>Your name *</label>
               <input style={styles.input} placeholder="First and last name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
