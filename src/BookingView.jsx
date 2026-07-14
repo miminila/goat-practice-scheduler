@@ -71,7 +71,7 @@ export default function BookingView({ mode }) {
   const dayBookings = bookings[dayKey] || {};
   const dayBlocked = !!blocked[dayKey];
   const dayHours = (data.hours || {})[dayKey] || null;
-  const openCount = dayBlocked ? 0 : DAILY_SLOTS.length - Object.keys(dayBookings).length;
+  const openCount = dayBlocked ? 0 : DAILY_SLOTS.filter(s => isSlotAvailable(s.time, dayHours) && !dayBookings[s.time]).length;
   const isViewingToday = dayKey === formatDate(new Date());
 
   async function confirmBook() {
@@ -157,19 +157,18 @@ export default function BookingView({ mode }) {
         <div style={styles.blockedBanner}>This day is closed — no practice scheduled. Please pick another day.</div>
       ) : (
         <div style={styles.grid}>
-          <div style={styles.lunchBar}>Lunch 12:00–1:00 PM — no slots</div>
-          {DAILY_SLOTS.map(slot => {
+          {(dayHours ? dayHours.lunch_blocked !== false : true) && <div style={styles.lunchBar}>Lunch 12:00–1:00 PM — no slots</div>}
+          {DAILY_SLOTS.filter(slot => !!dayBookings[slot.time] || isSlotAvailable(slot.time, dayHours)).map(slot => {
             const taken = !!dayBookings[slot.time];
             const now = new Date();
             const isPast = isViewingToday && (now.getHours() * 60 + now.getMinutes()) >= slot.time;
-            const isOutsideHours = !isSlotAvailable(slot.time, dayHours);
-            const unavailable = taken || isPast || isOutsideHours;
+            const unavailable = taken || isPast;
             return (
               <button key={slot.time} disabled={unavailable}
                 onClick={() => { setForm({ name: "", email: "", phone: "" }); setModal({ type: "confirm", slot }); }}
                 style={{ ...styles.slotBtn, ...(unavailable ? styles.slotTaken : styles.slotOpen) }}>
                 <span style={styles.slotTime}>{slot.label}</span>
-                <span style={styles.slotSub}>{taken ? "Taken" : isPast ? "Past" : isOutsideHours ? "Closed" : "Available - 10 min"}</span>
+                <span style={styles.slotSub}>{taken ? "Taken" : isPast ? "Past" : "Available - 10 min"}</span>
               </button>
             );
           })}
