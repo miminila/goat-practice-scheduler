@@ -21,23 +21,12 @@ async function notifyCoaches({ kind, name, email, phone, day, slot }) {
   } catch (_) {}
 }
 
+const ICS_ENDPOINT = "https://kafxlwboepfekybipzog.supabase.co/functions/v1/ics";
 function buildCalendarLink({ name, dateObj, slotTime, slotLabel }) {
-  const start = new Date(dateObj);
-  start.setMinutes(start.getMinutes() + slotTime);
-  const end = new Date(start); end.setMinutes(end.getMinutes() + 10);
   const z = (n) => String(n).padStart(2, "0");
-  const fmt = (d) => d.getUTCFullYear() + z(d.getUTCMonth()+1) + z(d.getUTCDate()) + "T" + z(d.getUTCHours()) + z(d.getUTCMinutes()) + "00Z";
-  const ics = [
-    "BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Goat Practice//EN","CALSCALE:GREGORIAN",
-    "BEGIN:VEVENT","UID:goat-" + Date.now() + "@bookgoatpractice.com",
-    "DTSTAMP:" + fmt(new Date()),"DTSTART:" + fmt(start),"DTEND:" + fmt(end),
-    "SUMMARY:Goat Practice",
-    "DESCRIPTION:Your 10-minute goat practice slot at " + slotLabel + ". Booked for " + name + ".",
-    "BEGIN:VALARM","TRIGGER:-P1D","ACTION:DISPLAY","DESCRIPTION:Goat practice tomorrow","END:VALARM",
-    "BEGIN:VALARM","TRIGGER:-PT1H","ACTION:DISPLAY","DESCRIPTION:Goat practice in 1 hour","END:VALARM",
-    "END:VEVENT","END:VCALENDAR",
-  ].join("\r\n");
-  return "data:text/calendar;charset=utf-8," + encodeURIComponent(ics);
+  const dateStr = dateObj.getFullYear() + "-" + z(dateObj.getMonth() + 1) + "-" + z(dateObj.getDate());
+  const params = new URLSearchParams({ name, date: dateStr, slotTime: String(slotTime), slotLabel });
+  return ICS_ENDPOINT + "?" + params.toString();
 }
 
 function formatDateKey(dk) {
@@ -200,7 +189,8 @@ export default function BookingView({ mode }) {
               <div style={styles.bigIcon}>✅</div>
               <h3 style={styles.modalTitle}>You're booked!</h3>
               <p style={styles.modalNote}>You've got {modal.slotLabel} on {modal.dayLabel}. Add it to your calendar so your phone reminds you — the day before and an hour before.</p>
-              <a href={modal.calLink} download="goat-practice.ics" style={styles.calBtn}>📅 Add to Calendar</a>
+              <a href={modal.calLink} target="_blank" rel="noopener noreferrer" style={styles.calBtn}>📅 Add to Calendar</a>
+              <p style={styles.calHint}>On some phones this downloads a file first — just tap it afterward to add the event.</p>
               <button style={styles.doneBtn} onClick={() => setModal(null)}>Done</button>
             </>}
             {modal.type === "error" && <>
@@ -278,6 +268,7 @@ const styles = {
   backBtn: { flex: 1, padding: "11px 0", background: "#eee", border: "none", borderRadius: 8, fontFamily: "Georgia, serif", fontSize: 14, cursor: "pointer", color: "#555" },
   confirmBtn: { flex: 1, padding: "11px 0", background: "#3B2008", color: "#F5D78E", border: "none", borderRadius: 8, fontFamily: "Georgia, serif", fontSize: 15, cursor: "pointer", fontWeight: "bold" },
   calBtn: { display: "block", textAlign: "center", padding: "12px 0", background: "#4A7C3F", color: "white", borderRadius: 8, fontFamily: "Georgia, serif", fontSize: 15, fontWeight: "bold", textDecoration: "none", marginBottom: 10 },
+  calHint: { margin: "-4px 0 14px", fontFamily: "sans-serif", fontSize: 11, color: "#999", textAlign: "center" },
   doneBtn: { width: "100%", padding: "11px 0", background: "#eee", color: "#555", border: "none", borderRadius: 8, fontFamily: "Georgia, serif", fontSize: 14, cursor: "pointer" },
   bigIcon: { fontSize: 40, textAlign: "center", marginBottom: 12 },
   card: { background: "white", borderRadius: 14, padding: 24, boxShadow: "0 2px 12px rgba(0,0,0,0.08)" },
