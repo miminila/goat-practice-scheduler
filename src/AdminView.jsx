@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { DAILY_SLOTS, getDays, formatDate, formatDayLabel, loadBookings, adminRemove, setDayBlock, saveDayHours, clearDayHours, makeTimeOptions, isSlotAvailable, LUNCH_START, LUNCH_END } from "./utils";
+import { DAILY_SLOTS, formatDate, formatDayLabel, loadBookings, adminRemove, setDayBlock, saveDayHours, clearDayHours, makeTimeOptions, isSlotAvailable, LUNCH_START, LUNCH_END, getDaysInRange, defaultDateRange, saveSettings } from "./utils";
 
 const TIME_OPTS = makeTimeOptions();
 
@@ -18,7 +18,6 @@ function TimeSelect({ value, onChange, placeholder, minValue, maxValue }) {
 }
 
 export default function AdminView() {
-  const DAYS = getDays();
   const [data, setData] = useState(null);
   const [selectedDay, setSelectedDay] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -26,15 +25,42 @@ export default function AdminView() {
   const [showHours, setShowHours] = useState(false);
   const [hoursError, setHoursError] = useState("");
   const [hoursForm, setHoursForm] = useState({ morning_start: null, morning_end: null, afternoon_start: null, afternoon_end: null, lunch_blocked: true });
+  const [showDateSettings, setShowDateSettings] = useState(false);
+  const [dateError, setDateError] = useState("");
+  const [dateForm, setDateForm] = useState({ start: "", end: "" });
+
+  const settings = (data && data.settings) || defaultDateRange();
+  const DAYS = getDaysInRange(settings.startDate, settings.endDate);
+  const selectedDayIndex = Math.min(selectedDay, DAYS.length - 1);
 
   async function refresh() { setData(await loadBookings()); }
   useEffect(function() { refresh(); }, []);
+
+  useEffect(function() {
+    if (data && data.settings) setDateForm({ start: data.settings.startDate, end: data.settings.endDate });
+  }, [data]);
+
+  async function handleSaveDates() {
+    setDateError("");
+    if (!dateForm.start || !dateForm.end) { setDateError("Please choose both a start and end date."); return; }
+    if (dateForm.end < dateForm.start) { setDateError("End date must be on or after the start date."); return; }
+    const spanDays = Math.round((new Date(dateForm.end) - new Date(dateForm.start)) / 86400000) + 1;
+    if (spanDays > 31) { setDateError("Please choose a range of 31 days or fewer."); return; }
+    setBusy(true);
+    const res = await saveSettings(dateForm.start, dateForm.end);
+    setBusy(false);
+    if (!res.ok) { setDateError("Could not save dates. Please try again."); return; }
+    await refresh();
+    setSelectedDay(0);
+    setShowDateSettings(false);
+    showToast("Practice dates updated.");
+  }
 
   function showToast(msg) { setToast(msg); setTimeout(() => setToast(""), 3000); }
 
   useEffect(function() {
     if (!data) return;
-    const dk = formatDate(DAYS[selectedDay]);
+    const dk = formatDate(DAYS[selectedDayIndex]);
     const h = (data.hours || {})[dk];
     if (h) {
       setHoursForm({ morning_start: h.morning_start, morning_end: h.morning_end, afternoon_start: h.afternoon_start, afternoon_end: h.afternoon_end, lunch_blocked: h.lunch_blocked !== false });
@@ -48,7 +74,7 @@ export default function AdminView() {
   const bookings = data.bookings;
   const blocked = data.blocked || {};
   const hoursMap = data.hours || {};
-  const dayKey = formatDate(DAYS[selectedDay]);
+  const dayKey = formatDate(DAYS[selectedDayIndex]);
   const dayBookings = bookings[dayKey] || {};
   const isBlocked = !!blocked[dayKey];
   const dayHours = hoursMap[dayKey] || null;
@@ -82,7 +108,7 @@ export default function AdminView() {
     setBusy(false);
     setShowHours(false);
     setHoursError("");
-    showToast("Hours saved for " + formatDayLabel(DAYS[selectedDay], selectedDay) + ".");
+    showToast("Hours saved for " + formatDayLabel(DAYS[selectedDayIndex]) + ".");
   }
 
   async function handleClearHours() {
@@ -106,17 +132,49 @@ export default function AdminView() {
   const roster = DAILY_SLOTS.map(slot => ({ slot, booking: dayBookings[slot.time] || null, available: isSlotAvailable(slot.time, dayHours) }));
   const totalBooked = DAYS.reduce((sum, d) => sum + Object.keys(bookings[formatDate(d)] || {}).length, 0);
   const hasCustomHours = !!dayHours;
-  const nowMinutes = selectedDay === 0 ? (new Date().getHours() * 60 + new Date().getMinutes()) : -1;
+  const isViewingToday = dayKey === formatDate(new Date());
+  const nowMinutes = isViewingToday ? (new Date().getHours() * 60 + new Date().getMinutes()) : -1;
 
   return (
     <div style={styles.body}>
       {toast && <div style={styles.toast}>{toast}</div>}
 
       <div style={styles.summaryRow}>
-        <div style={styles.summaryCard}><span style={styles.summaryNum}>{totalBooked}</span><span style={styles.summaryLabel}>Booked 10 days</span></div>
+        <div style={styles.summaryCard}><span style={styles.summaryNum}>{totalBooked}</span><span style={styles.summaryLabel}>Booked {DAYS.length} {DAYS.length === 1 ? "day" : "days"}</span></div>
         <div style={styles.summaryCard}><span style={styles.summaryNum}>{bookedCount}</span><span style={styles.summaryLabel}>Booked today</span></div>
         <div style={styles.summaryCard}><span style={styles.summaryNum}>{openCount}</span><span style={styles.summaryLabel}>Open today</span></div>
       </div>
+
+      <div style={styles.dateRangeCard}>
+        <div>
+          <span style={styles.dateRangeLabel}>Practice Dates</span>
+          <span style={styles.dateRangeValue}>
+            {DAYS[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+            {DAYS.length > 1 ? " – " + DAYS[DAYS.length - 1].toLocaleDateString("en-US", { month: "short", day: "numeric" }) : ""}
+            {" (" + DAYS.length + " " + (DAYS.length === 1 ? "day" : "days") + ")"}
+          </span>
+        </div>
+        <button style={styles.hoursBtn} onClick={() => setShowDateSettings(!showDateSettings)}>
+          {showDateSettings ? "Close" : "Edit Dates"}
+        </button>
+      </div>
+
+      {showDateSettings && (
+        <div style={styles.hoursPanel}>
+          <h3 style={styles.hoursPanelTitle}>Set Practice Dates</h3>
+          <p style={styles.hoursPanelHint}>Choose the exact days students can book, for example a 4-day window during Nationals. Days outside this range won't show up or be bookable. Existing bookings are kept even if their day falls outside the new range.</p>
+          <div style={styles.hoursRow}>
+            <input type="date" style={styles.dateInput} value={dateForm.start} onChange={e => setDateForm(f => ({ ...f, start: e.target.value }))} />
+            <span style={styles.hoursTo}>to</span>
+            <input type="date" style={styles.dateInput} value={dateForm.end} onChange={e => setDateForm(f => ({ ...f, end: e.target.value }))} />
+          </div>
+          {dateError && <p style={{ color: "#C0392B", fontFamily: "sans-serif", fontSize: 13, margin: "0 0 10px", background: "#fdecea", padding: "8px 12px", borderRadius: 8 }}>{dateError}</p>}
+          <div style={styles.hoursBtns}>
+            <button style={styles.cancelHoursBtn} onClick={() => setShowDateSettings(false)}>Cancel</button>
+            <button style={styles.saveHoursBtn} disabled={busy} onClick={handleSaveDates}>Save Dates</button>
+          </div>
+        </div>
+      )}
 
       <div style={{ textAlign: "right", marginBottom: 4 }}>
         <a href="#quick-reference" style={styles.jumpLink}>📋 How to Use Coach View</a>
@@ -129,7 +187,7 @@ export default function AdminView() {
           const blk = blocked[dk];
           const custom = !!(hoursMap[dk]);
           return (
-            <button key={i} style={{ ...styles.dayBtn, ...(selectedDay === i ? styles.dayBtnActive : {}), ...(blk ? styles.dayBtnBlocked : {}) }} onClick={() => { setSelectedDay(i); setShowHours(false); }}>
+            <button key={i} style={{ ...styles.dayBtn, ...(selectedDayIndex === i ? styles.dayBtnActive : {}), ...(blk ? styles.dayBtnBlocked : {}) }} onClick={() => { setSelectedDay(i); setShowHours(false); }}>
               <span style={styles.dayBtnTop}>{formatDayLabel(d, i)}</span>
               <span style={styles.dayBtnSub}>{blk ? "BLOCKED" : custom ? "Custom hrs" : count + "/" + DAILY_SLOTS.length}</span>
             </button>
@@ -139,8 +197,8 @@ export default function AdminView() {
 
       <div style={styles.dayHeader}>
         <div>
-          <h2 style={styles.dayTitle}>{formatDayLabel(DAYS[selectedDay], selectedDay)}</h2>
-          <p style={styles.daySubtitle}>{DAYS[selectedDay].toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</p>
+          <h2 style={styles.dayTitle}>{formatDayLabel(DAYS[selectedDayIndex])}</h2>
+          <p style={styles.daySubtitle}>{DAYS[selectedDayIndex].toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</p>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button style={styles.refreshBtn} disabled={busy} onClick={refresh}>Refresh</button>
@@ -157,7 +215,7 @@ export default function AdminView() {
 
       {showHours && (
         <div style={styles.hoursPanel}>
-          <h3 style={styles.hoursPanelTitle}>Custom Hours for {formatDayLabel(DAYS[selectedDay], selectedDay)}</h3>
+          <h3 style={styles.hoursPanelTitle}>Custom Hours for {formatDayLabel(DAYS[selectedDayIndex])}</h3>
           <p style={styles.hoursPanelHint}>Set morning and/or afternoon windows. Only slots within these times will be available to students. Leave blank to use the full default schedule.</p>
 
           <div style={styles.hoursSection}>
@@ -237,6 +295,7 @@ export default function AdminView() {
         </thead>
         <tbody>
           {[
+            ["Set practice dates", "Click Edit Dates → choose start/end date → Save Dates"],
             ["Block a whole day", "Click day tab → Block Day"],
             ["Unblock a day", "Click day tab → Unblock Day"],
             ["Set custom hours", "Click day tab → Set Hours"],
@@ -280,6 +339,10 @@ const styles = {
   unblockBtn: { background: "#4A7C3F" },
   blockedBanner: { background: "#fdecea", border: "1px solid #f5c6c2", borderRadius: 8, padding: "10px 14px", fontFamily: "sans-serif", fontSize: 13, color: "#922b21", marginBottom: 14 },
   customHoursBanner: { background: "#EBF5FB", border: "1px solid #AED6F1", borderRadius: 8, padding: "10px 14px", fontFamily: "sans-serif", fontSize: 13, color: "#1A5276", marginBottom: 14 },
+  dateRangeCard: { display: "flex", justifyContent: "space-between", alignItems: "center", background: "white", border: "2px solid #C9A96E", borderRadius: 12, padding: "12px 16px", marginBottom: 12, flexWrap: "wrap", gap: 10 },
+  dateRangeLabel: { display: "block", fontFamily: "sans-serif", fontSize: 11, fontWeight: "bold", color: "#888", textTransform: "uppercase", letterSpacing: "0.5px" },
+  dateRangeValue: { display: "block", fontFamily: "sans-serif", fontSize: 15, fontWeight: "bold", color: "#3B2008", marginTop: 2 },
+  dateInput: { padding: "9px 10px", border: "1.5px solid #ddd", borderRadius: 8, fontFamily: "sans-serif", fontSize: 14 },
   hoursPanel: { background: "white", border: "2px solid #AED6F1", borderRadius: 12, padding: 20, marginBottom: 16, boxShadow: "0 2px 10px rgba(0,0,0,0.08)" },
   hoursPanelTitle: { margin: "0 0 6px", fontSize: 17, color: "#3B2008" },
   hoursPanelHint: { margin: "0 0 16px", fontSize: 13, fontFamily: "sans-serif", color: "#666", lineHeight: 1.5 },
