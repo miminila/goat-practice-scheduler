@@ -1,5 +1,5 @@
 export const SLOT_INTERVAL = 15;
-export const DAY_START = 8 * 60;
+export const DAY_START = 13 * 60;
 export const DAY_END = 16 * 60;
 export const LUNCH_START = 12 * 60;
 export const LUNCH_END = 13 * 60;
