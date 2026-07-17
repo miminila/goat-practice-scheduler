@@ -28,6 +28,13 @@ export default function AdminView() {
   const [showDateSettings, setShowDateSettings] = useState(false);
   const [dateError, setDateError] = useState("");
   const [dateForm, setDateForm] = useState({ start: "", end: "" });
+  const [isMobile, setIsMobile] = useState(typeof window !== "undefined" && window.innerWidth < 640);
+
+  useEffect(function() {
+    function onResize() { setIsMobile(window.innerWidth < 640); }
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   const settings = (data && data.settings) || defaultDateRange();
   const DAYS = getDaysInRange(settings.startDate, settings.endDate);
@@ -260,23 +267,43 @@ export default function AdminView() {
       )}
 
       <div style={styles.rosterWrap}>
-        <div style={styles.rosterHeader}>
-          <span style={styles.colTime}>Time</span>
-          <span style={styles.colName}>Student</span>
-          <span style={styles.colPhone}>Phone</span>
-          <span style={styles.colEmail}>Email</span>
-          <span style={styles.colAct}></span>
-        </div>
+        {!isMobile && (
+          <div style={styles.rosterHeader}>
+            <span style={styles.colTime}>Time</span>
+            <span style={styles.colName}>Student</span>
+            <span style={styles.colPhone}>Phone</span>
+            <span style={styles.colEmail}>Email</span>
+            <span style={styles.colAct}></span>
+          </div>
+        )}
         {roster.map(({ slot, booking, available }) => {
           const isLunch = slot.time >= LUNCH_START && slot.time < LUNCH_END;
           const isPast = nowMinutes >= 0 && slot.time < nowMinutes;
           const bg = booking ? "#fff" : isPast ? "#f5f0e8" : !available ? "#f5f0e8" : "#f9faf9";
+          const statusEl = booking ? booking.name : isPast ? <span style={styles.closedLabel}>past</span> : !available ? <span style={styles.closedLabel}>{isLunch ? "lunch" : "closed"}</span> : <span style={styles.openLabel}>open</span>;
+
+          if (isMobile) {
+            return (
+              <div key={slot.time} style={{ ...styles.rosterRowMobile, background: bg }}>
+                <div style={styles.mobileTopLine}>
+                  <strong style={{ color: (!available || isPast) && !booking ? "#bbb" : "#2c1a0e" }}>{slot.label}</strong>
+                  {booking && <button style={styles.removeBtn} disabled={busy} onClick={() => removeBooking(slot.time, booking.name, slot.label)}>Remove</button>}
+                </div>
+                <div style={styles.mobileName}>{statusEl}</div>
+                {booking && (
+                  <div style={styles.mobileDetails}>
+                    {booking.phone && <span>{booking.phone}</span>}
+                    <span>{booking.email}</span>
+                  </div>
+                )}
+              </div>
+            );
+          }
+
           return (
             <div key={slot.time} style={{ ...styles.rosterRow, background: bg }}>
               <span style={styles.colTime}><strong style={{ color: (!available || isPast) && !booking ? "#bbb" : "#2c1a0e" }}>{slot.label}</strong></span>
-              <span style={styles.colName}>
-                {booking ? booking.name : isPast ? <span style={styles.closedLabel}>past</span> : !available ? <span style={styles.closedLabel}>{isLunch ? "lunch" : "closed"}</span> : <span style={styles.openLabel}>open</span>}
-              </span>
+              <span style={styles.colName}>{statusEl}</span>
               <span style={styles.colPhone}>{booking ? booking.phone || "" : ""}</span>
               <span style={styles.colEmail}>{booking ? booking.email : ""}</span>
               <span style={styles.colAct}>{booking && <button style={styles.removeBtn} disabled={busy} onClick={() => removeBooking(slot.time, booking.name, slot.label)}>Remove</button>}</span>
@@ -364,6 +391,10 @@ const styles = {
   colPhone: { width: 130, flexShrink: 0, fontSize: 13, color: "#555" },
   colEmail: { flex: 1.4, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", fontSize: 13, color: "#555" },
   colAct: { width: 80, flexShrink: 0, textAlign: "right" },
+  rosterRowMobile: { display: "flex", flexDirection: "column", padding: "11px 14px", borderBottom: "1px solid #f0e8d8", fontFamily: "sans-serif", fontSize: 14, gap: 4 },
+  mobileTopLine: { display: "flex", justifyContent: "space-between", alignItems: "center" },
+  mobileName: { fontSize: 14, color: "#2c1a0e" },
+  mobileDetails: { display: "flex", flexDirection: "column", fontSize: 13, color: "#555", gap: 2 },
   openLabel: { color: "#4A7C3F", fontStyle: "italic" },
   closedLabel: { color: "#bbb", fontStyle: "italic" },
   removeBtn: { padding: "4px 10px", background: "#C0392B", color: "white", border: "none", borderRadius: 6, fontFamily: "sans-serif", fontSize: 12, cursor: "pointer" },
