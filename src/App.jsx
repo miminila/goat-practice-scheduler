@@ -63,6 +63,16 @@ export default function App() {
             </div>
           )
       )}
+
+      {/* Footer */}
+      <div style={styles.footer}>
+        <p style={styles.footerText}>
+          Questions or issues with this site? Contact{" "}
+          <a href="mailto:stockdogcoursedirector2026@gmail.com" style={styles.footerLink}>
+            stockdogcoursedirector2026@gmail.com
+          </a>
+        </p>
+      </div>
     </div>
   );
 }
@@ -85,4 +95,7 @@ const styles = {
   input: { width: "100%", padding: "11px 14px", border: "1.5px solid #ddd", borderRadius: 8, fontFamily: "sans-serif", fontSize: 15, marginBottom: 10, boxSizing: "border-box" },
   errorMsg: { color: "#C0392B", fontFamily: "sans-serif", fontSize: 13, margin: "0 0 10px" },
   loginBtn: { width: "100%", padding: "12px 0", background: "#3B2008", color: "#F5D78E", border: "none", borderRadius: 8, fontFamily: "Georgia, serif", fontSize: 15, cursor: "pointer", fontWeight: "bold" },
+  footer: { padding: "24px 20px 32px", textAlign: "center" },
+  footerText: { margin: 0, fontSize: 12, fontFamily: "sans-serif", color: "#8a7355" },
+  footerLink: { color: "#6B3A1F", fontWeight: "bold", textDecoration: "none" },
 };
