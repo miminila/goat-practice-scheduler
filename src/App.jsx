@@ -7,6 +7,7 @@ export default function App() {
   const [adminUnlocked, setAdminUnlocked] = useState(false);
   const [adminInput, setAdminInput] = useState("");
   const [adminError, setAdminError] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || "Goat$2026";
 
@@ -49,14 +50,24 @@ export default function App() {
                 <div style={styles.loginIcon}>🔒</div>
                 <h2 style={styles.loginTitle}>Coach Access</h2>
                 <p style={styles.loginHint}>Enter your password to view the full schedule.</p>
-                <input
-                  style={styles.input}
-                  type="password"
-                  placeholder="Password"
-                  value={adminInput}
-                  onChange={e => setAdminInput(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && handleAdminLogin()}
-                />
+                <div style={styles.passwordWrap}>
+                  <input
+                    style={styles.input}
+                    type={showPassword ? "text" : "password"}
+                    placeholder="Password"
+                    value={adminInput}
+                    onChange={e => setAdminInput(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && handleAdminLogin()}
+                  />
+                  <button
+                    type="button"
+                    style={styles.showPasswordBtn}
+                    onClick={() => setShowPassword(s => !s)}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                  >
+                    {showPassword ? "🙈" : "👁️"}
+                  </button>
+                </div>
                 {adminError && <p style={styles.errorMsg}>{adminError}</p>}
                 <button style={styles.loginBtn} onClick={handleAdminLogin}>Enter</button>
               </div>
@@ -92,7 +103,9 @@ const styles = {
   loginIcon: { fontSize: 40, marginBottom: 12 },
   loginTitle: { margin: "0 0 6px", fontSize: 22, color: "#3B2008" },
   loginHint: { margin: "0 0 20px", fontSize: 13, fontFamily: "sans-serif", color: "#666" },
-  input: { width: "100%", padding: "11px 14px", border: "1.5px solid #ddd", borderRadius: 8, fontFamily: "sans-serif", fontSize: 15, marginBottom: 10, boxSizing: "border-box" },
+  input: { width: "100%", padding: "11px 40px 11px 14px", border: "1.5px solid #ddd", borderRadius: 8, fontFamily: "sans-serif", fontSize: 15, marginBottom: 0, boxSizing: "border-box" },
+  passwordWrap: { position: "relative", marginBottom: 10 },
+  showPasswordBtn: { position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", fontSize: 17, padding: 6, lineHeight: 1 },
   errorMsg: { color: "#C0392B", fontFamily: "sans-serif", fontSize: 13, margin: "0 0 10px" },
   loginBtn: { width: "100%", padding: "12px 0", background: "#3B2008", color: "#F5D78E", border: "none", borderRadius: 8, fontFamily: "Georgia, serif", fontSize: 15, cursor: "pointer", fontWeight: "bold" },
   footer: { padding: "24px 20px 32px", textAlign: "center" },
