@@ -1,101 +1,112 @@
 import { useState, useEffect } from "react";
-import BookingView from "./BookingView";
-import AdminView from "./AdminView";
+import { DAILY_SLOTS, formatDate, formatDayLabel, loadBookings, adminRemove, setDayBlock, saveDayHours, clearDayHours, makeTimeOptions, isSlotAvailable, LUNCH_START, LUNCH_END, getDaysInRange, defaultDateRange, saveSettings } from "./utils";
 
-export default function App() {
-  const [page, setPage] = useState("book"); // "book" | "cancel" | "admin"
-  const [adminUnlocked, setAdminUnlocked] = useState(false);
-  const [adminInput, setAdminInput] = useState("");
-  const [adminError, setAdminError] = useState("");
+const TIME_OPTS = makeTimeOptions();
+const BOOKING_EMAIL_KEY = "041fdbc9-cf60-4674-a2e4-1ffa01ee0ab7";
 
-  const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || "Goat$2026";
-
-  function handleAdminLogin() {
-    if (adminInput === ADMIN_PASSWORD) {
-      setAdminUnlocked(true);
-      setAdminError("");
-    } else {
-      setAdminError("Incorrect password.");
-    }
+// Sends ONE grouped notification email for a person covering every slot they booked on a given day.
+async function resendGroupedNotification({ name, email, phone, day, slotLabels }) {
+  const slotsText = slotLabels.join(", ");
+  const countLabel = slotLabels.length + (slotLabels.length === 1 ? " slot" : " slots");
+  const subject = "RESEND - Goat practice - " + name + ", " + day + " (" + countLabel + ")";
+  const message = "This is a resent booking notification (sent manually from Coach View).\n\n" +
+    "Name: " + name + "\nEmail: " + email + "\nPhone: " + phone + "\nDay: " + day + "\nTimes: " + slotsText;
+  try {
+    const res = await fetch("https://api.web3forms.com/submit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        access_key: BOOKING_EMAIL_KEY,
+        subject,
+        from_name: "Goat Practice",
+        name, email, phone, day,
+        slots: slotsText,
+        message,
+        botcheck: "",
+      }),
+    });
+    const data = await res.json();
+    return res.ok && data.success;
+  } catch (_) {
+    return false;
   }
+}
 
+function TimeSelect({ value, onChange, placeholder, minValue, maxValue }) {
+  const filtered = TIME_OPTS.filter(o => {
+    if (minValue != null && o.value <= minValue) return false;
+    if (maxValue != null && o.value >= maxValue) return false;
+    return true;
+  });
   return (
-    <div style={styles.app}>
-      {/* Header */}
-      <div style={styles.header}>
-        <div style={styles.headerInner}>
-          <span style={styles.logo}>🐐</span>
-          <div>
-            <h1 style={styles.title}>Goat Practice</h1>
-            <p style={styles.subtitle}>Book · Cancel · Manage</p>
-          </div>
-        </div>
-        <div style={styles.navRow}>
-          <button style={{ ...styles.navBtn, ...(page === "book" ? styles.navActive : {}) }} onClick={() => setPage("book")}>Book a Slot</button>
-          <button style={{ ...styles.navBtn, ...(page === "cancel" ? styles.navActive : {}) }} onClick={() => setPage("cancel")}>Cancel My Slot</button>
-          <button style={{ ...styles.navBtn, ...(page === "admin" ? styles.navActive : {}) }} onClick={() => setPage("admin")}>Coach View</button>
-        </div>
-      </div>
-
-      {/* Body */}
-      {page === "book" && <BookingView mode="book" />}
-      {page === "cancel" && <BookingView mode="cancel" />}
-      {page === "admin" && (
-        adminUnlocked
-          ? <AdminView />
-          : (
-            <div style={styles.loginWrap}>
-              <div style={styles.loginBox}>
-                <div style={styles.loginIcon}>🔒</div>
-                <h2 style={styles.loginTitle}>Coach Access</h2>
-                <p style={styles.loginHint}>Enter your password to view the full schedule.</p>
-                <input
-                  style={styles.input}
-                  type="password"
-                  placeholder="Password"
-                  value={adminInput}
-                  onChange={e => setAdminInput(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && handleAdminLogin()}
-                />
-                {adminError && <p style={styles.errorMsg}>{adminError}</p>}
-                <button style={styles.loginBtn} onClick={handleAdminLogin}>Enter</button>
-              </div>
-            </div>
-          )
-      )}
-
-      {/* Footer */}
-      <div style={styles.footer}>
-        <p style={styles.footerText}>
-          Questions or issues with this site? Contact{" "}
-          <a href="mailto:stockdogcoursedirector2026@gmail.com" style={styles.footerLink}>
-            stockdogcoursedirector2026@gmail.com
-          </a>
-        </p>
-      </div>
-    </div>
+    <select style={styles.timeSelect} value={value == null ? "" : value} onChange={e => onChange(e.target.value === "" ? null : parseInt(e.target.value))}>
+      <option value="">{placeholder}</option>
+      {filtered.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+    </select>
   );
 }
 
-const styles = {
-  app: { minHeight: "100vh", background: "#F5EFE0", fontFamily: "'Georgia', serif", color: "#2c1a0e" },
-  header: { background: "linear-gradient(135deg, #3B2008 0%, #6B3A1F 100%)", padding: "24px 20px 0", color: "#F5EFE0" },
-  headerInner: { display: "flex", alignItems: "center", gap: 14, marginBottom: 20 },
-  logo: { fontSize: 42, lineHeight: 1 },
-  title: { margin: 0, fontSize: 28, fontWeight: "bold", color: "#F5D78E", letterSpacing: "-0.5px" },
-  subtitle: { margin: "2px 0 0", fontSize: 13, color: "#C9A96E", fontFamily: "sans-serif" },
-  navRow: { display: "flex", gap: 4 },
-  navBtn: { flex: 1, padding: "10px 0", border: "none", borderRadius: "8px 8px 0 0", background: "rgba(255,255,255,0.12)", color: "#C9A96E", fontFamily: "Georgia, serif", fontSize: 13, cursor: "pointer" },
-  navActive: { background: "#F5EFE0", color: "#3B2008", fontWeight: "bold" },
-  loginWrap: { display: "flex", justifyContent: "center", padding: "60px 20px" },
-  loginBox: { background: "white", borderRadius: 16, padding: 36, width: "100%", maxWidth: 360, boxShadow: "0 4px 24px rgba(0,0,0,0.10)", textAlign: "center" },
-  loginIcon: { fontSize: 40, marginBottom: 12 },
-  loginTitle: { margin: "0 0 6px", fontSize: 22, color: "#3B2008" },
-  loginHint: { margin: "0 0 20px", fontSize: 13, fontFamily: "sans-serif", color: "#666" },
-  input: { width: "100%", padding: "11px 14px", border: "1.5px solid #ddd", borderRadius: 8, fontFamily: "sans-serif", fontSize: 15, marginBottom: 10, boxSizing: "border-box" },
-  errorMsg: { color: "#C0392B", fontFamily: "sans-serif", fontSize: 13, margin: "0 0 10px" },
-  loginBtn: { width: "100%", padding: "12px 0", background: "#3B2008", color: "#F5D78E", border: "none", borderRadius: 8, fontFamily: "Georgia, serif", fontSize: 15, cursor: "pointer", fontWeight: "bold" },
-  footer: { padding: "24px 20px 32px", textAlign: "center" },
-  footerText: { margin: 0, fontSize: 12, fontFamily: "sans-serif", color: "#8a7355" },
-  footerLink: { color: "#6B3A1F", fontWeight: "bold", textDecoration: "none" },
-};
+export default function AdminView() {
+  const [data, setData] = useState(null);
+  const [selectedDay, setSelectedDay] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [toast, setToast] = useState("");
+  const [showHours, setShowHours] = useState(false);
+  const [hoursError, setHoursError] = useState("");
+  const [hoursForm, setHoursForm] = useState({ morning_start: null, morning_end: null, afternoon_start: null, afternoon_end: null, lunch_blocked: true });
+  const [showDateSettings, setShowDateSettings] = useState(false);
+  const [dateError, setDateError] = useState("");
+  const [dateForm, setDateForm] = useState({ start: "", end: "" });
+  const [isMobile, setIsMobile] = useState(typeof window !== "undefined" && window.innerWidth < 640);
+
+  useEffect(function() {
+    function onResize() { setIsMobile(window.innerWidth < 640); }
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  const settings = (data && data.settings) || defaultDateRange();
+  const DAYS = getDaysInRange(settings.startDate, settings.endDate);
+  const selectedDayIndex = Math.min(selectedDay, DAYS.length - 1);
+
+  async function refresh() { setData(await loadBookings()); }
+  useEffect(function() { refresh(); }, []);
+
+  useEffect(function() {
+    if (data && data.settings) setDateForm({ start: data.settings.startDate, end: data.settings.endDate });
+  }, [data]);
+
+  async function handleSaveDates() {
+    setDateError("");
+    if (!dateForm.start || !dateForm.end) { setDateError("Please choose both a start and end date."); return; }
+    if (dateForm.end < dateForm.start) { setDateError("End date must be on or after the start date."); return; }
+    const spanDays = Math.round((new Date(dateForm.end) - new Date(dateForm.start)) / 86400000) + 1;
+    if (spanDays > 31) { setDateError("Please choose a range of 31 days or fewer."); return; }
+    setBusy(true);
+    const res = await saveSettings(dateForm.start, dateForm.end);
+    setBusy(false);
+    if (!res.ok) { setDateError("Could not save dates. Please try again."); return; }
+    await refresh();
+    setSelectedDay(0);
+    setShowDateSettings(false);
+    showToast("Practice dates updated.");
+  }
+
+  function showToast(msg) { setToast(msg); setTimeout(() => setToast(""), 3000); }
+
+  useEffect(function() {
+    if (!data) return;
+    const dk = formatDate(DAYS[selectedDayIndex]);
+    const h = (data.hours || {})[dk];
+    if (h) {
+      setHoursForm({ morning_start: h.morning_start, morning_end: h.morning_end, afternoon_start: h.afternoon_start, afternoon_end: h.afternoon_end, lunch_blocked: h.lunch_blocked !== false });
+    } else {
+      setHoursForm({ morning_start: null, morning_end: null, afternoon_start: null, afternoon_end: null, lunch_blocked: true });
+    }
+  }, [selectedDay, data]);
+
+  if (!data) return <div style={styles.loading}>Loading...</div>;
+
+  const bookings = data.bookings;
+  const blocked = data.blocked || {};
+  const hoursMap =
