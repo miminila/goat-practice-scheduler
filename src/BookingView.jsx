@@ -21,6 +21,17 @@ async function notifyCoaches({ kind, name, email, phone, day, slot }) {
   } catch (_) {}
 }
 
+const STUDENT_CONFIRM_ENDPOINT = "https://kafxlwboepfekybipzog.supabase.co/functions/v1/student-confirmation";
+async function sendStudentConfirmation({ name, email, day, slots }) {
+  try {
+    await fetch(STUDENT_CONFIRM_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, email, day, slots }),
+    });
+  } catch (_) {}
+}
+
 const ICS_ENDPOINT = "https://kafxlwboepfekybipzog.supabase.co/functions/v1/ics";
 function buildCalendarLink({ name, dateObj, slotTime, slotLabel }) {
   const z = (n) => String(n).padStart(2, "0");
@@ -104,6 +115,7 @@ export default function BookingView({ mode }) {
 
     const dayLabel = formatDayLabel(DAYS[selectedDayIndex]);
     notifyCoaches({ kind: "new", name, email, phone: formatPhone(phone), day: dayLabel, slot: slot.label });
+    sendStudentConfirmation({ name, email, day: dayLabel, slots: [slot.label] });
     const calLink = buildCalendarLink({ name, dateObj: DAYS[selectedDayIndex], slotTime: slot.time, slotLabel: slot.label });
     const googleCalLink = buildGoogleCalendarLink({ name, dateObj: DAYS[selectedDayIndex], slotTime: slot.time, slotLabel: slot.label });
     await refresh();

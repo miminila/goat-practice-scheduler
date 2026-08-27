@@ -3,6 +3,18 @@ import { DAILY_SLOTS, formatDate, formatDayLabel, loadBookings, adminRemove, set
 
 const TIME_OPTS = makeTimeOptions();
 const BOOKING_EMAIL_KEY = "041fdbc9-cf60-4674-a2e4-1ffa01ee0ab7";
+const STUDENT_CONFIRM_ENDPOINT = "https://kafxlwboepfekybipzog.supabase.co/functions/v1/student-confirmation";
+
+// Resends the student's own confirmation email (same one they get automatically when they book).
+async function resendStudentConfirmation({ name, email, day, slotLabels }) {
+  try {
+    await fetch(STUDENT_CONFIRM_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, email, day, slots: slotLabels }),
+    });
+  } catch (_) {}
+}
 
 // Sends ONE grouped notification email for a person covering every slot they booked on a given day.
 async function resendGroupedNotification({ name, email, phone, day, slotLabels }) {
@@ -58,6 +70,11 @@ export default function AdminView() {
   const [dateError, setDateError] = useState("");
   const [dateForm, setDateForm] = useState({ start: "", end: "" });
   const [isMobile, setIsMobile] = useState(typeof window !== "undefined" && window.innerWidth < 640);
+  const [showBroadcast, setShowBroadcast] = useState(false);
+  const [broadcastSubject, setBroadcastSubject] = useState("");
+  const [broadcastMessage, setBroadcastMessage] = useState("");
+  const [broadcastError, setBroadcastError] = useState("");
+  const [broadcastSending, setBroadcastSending] = useState(false);
 
   useEffect(function() {
     function onResize() { setIsMobile(window.innerWidth < 640); }
@@ -183,20 +200,75 @@ export default function AdminView() {
     if (!(booking.email in firstSlotTimeByEmail)) firstSlotTimeByEmail[booking.email] = slot.time;
   });
 
-  // Resends one grouped notification for a single person, covering every slot they hold this day.
+  // All unique students across the current practice date range (for the broadcast tool),
+  // deduped by email, keeping the first name seen for each.
+  const allStudents = {};
+  DAYS.forEach(d => {
+    const dayB = bookings[formatDate(d)] || {};
+    Object.values(dayB).forEach(b => {
+      if (!allStudents[b.email]) allStudents[b.email] = { name: b.name, email: b.email };
+    });
+  });
+  const uniqueStudents = Object.values(allStudents);
+
+  async function handleSendBroadcast() {
+    setBroadcastError("");
+    const subject = broadcastSubject.trim();
+    const message = broadcastMessage.trim();
+    if (!subject) { setBroadcastError("Please add a subject."); return; }
+    if (!message) { setBroadcastError("Please write a message."); return; }
+    if (!uniqueStudents.length) { setBroadcastError("No students booked in this date range."); return; }
+
+    const ok = window.confirm(
+      "Send this to all " + uniqueStudents.length + " student(s) booked between " +
+      formatDayLabel(DAYS[0]) + " and " + formatDayLabel(DAYS[DAYS.length - 1]) + "?\n\n" +
+      "Subject: " + subject
+    );
+    if (!ok) return;
+
+    setBroadcastSending(true);
+    try {
+      const res = await fetch("https://kafxlwboepfekybipzog.supabase.co/functions/v1/broadcast-message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subject, message, recipients: uniqueStudents }),
+      });
+      const result = await res.json();
+      if (res.ok && result.success) {
+        showToast("Sent to " + uniqueStudents.length + " student(s).");
+        setShowBroadcast(false);
+        setBroadcastSubject("");
+        setBroadcastMessage("");
+      } else {
+        setBroadcastError("Send failed. Please try again.");
+      }
+    } catch (_) {
+      setBroadcastError("Send failed. Please try again.");
+    }
+    setBroadcastSending(false);
+  }
+
+
+  // Resends both the coach notification and the student's own confirmation email,
+  // covering every slot that person holds this day.
   async function resendPersonNotification(booking) {
     const dayLabel = formatDayLabel(DAYS[selectedDayIndex]);
     const slotLabels = slotLabelsByEmail[booking.email] || [];
     const countLabel = slotLabels.length + (slotLabels.length === 1 ? " slot" : " slots");
     const ok = window.confirm(
-      "Resend notification to " + booking.name + " for " + dayLabel + "?\n\n" +
-      "This sends 1 email covering " + countLabel + ": " + slotLabels.join(", ")
+      "Resend for " + booking.name + " (" + dayLabel + ")?\n\n" +
+      "This sends 2 emails covering " + countLabel + " (" + slotLabels.join(", ") + "):\n" +
+      "1. Coach notification\n" +
+      "2. Confirmation directly to " + booking.email
     );
     if (!ok) return;
     setBusy(true);
-    const success = await resendGroupedNotification({ name: booking.name, email: booking.email, phone: booking.phone, day: dayLabel, slotLabels });
+    const [coachOk] = await Promise.all([
+      resendGroupedNotification({ name: booking.name, email: booking.email, phone: booking.phone, day: dayLabel, slotLabels }),
+      resendStudentConfirmation({ name: booking.name, email: booking.email, day: dayLabel, slotLabels }),
+    ]);
     setBusy(false);
-    showToast(success ? "Sent notification to " + booking.name + " for " + dayLabel + "." : "Could not send notification to " + booking.name + ".");
+    showToast(coachOk ? "Sent to coach + " + booking.name + " for " + dayLabel + "." : "Could not send coach notification for " + booking.name + ".");
   }
 
   return (
@@ -240,9 +312,52 @@ export default function AdminView() {
         </div>
       )}
 
+      <div style={styles.dateRangeCard}>
+        <div>
+          <span style={styles.dateRangeLabel}>Message Students</span>
+          <span style={styles.dateRangeValue}>{uniqueStudents.length} student{uniqueStudents.length === 1 ? "" : "s"} booked this window</span>
+        </div>
+        <button style={styles.hoursBtn} onClick={() => { setBroadcastError(""); setShowBroadcast(!showBroadcast); }}>
+          {showBroadcast ? "Close" : "Message All Students"}
+        </button>
+      </div>
+
+      {showBroadcast && (
+        <div style={styles.hoursPanel}>
+          <h3 style={styles.hoursPanelTitle}>Message All Students</h3>
+          <p style={styles.hoursPanelHint}>
+            Sends one email to every student booked between {formatDayLabel(DAYS[0])} and {formatDayLabel(DAYS[DAYS.length - 1])}
+            {" "}({uniqueStudents.length} {uniqueStudents.length === 1 ? "person" : "people"}). Each student only sees their own email.
+          </p>
+          <label style={styles.label}>Subject</label>
+          <input
+            style={styles.broadcastInput}
+            placeholder="e.g. Schedule change for Saturday"
+            value={broadcastSubject}
+            onChange={e => setBroadcastSubject(e.target.value)}
+          />
+          <label style={styles.label}>Message</label>
+          <textarea
+            style={styles.broadcastTextarea}
+            placeholder="Write your message here..."
+            rows={6}
+            value={broadcastMessage}
+            onChange={e => setBroadcastMessage(e.target.value)}
+          />
+          {broadcastError && <p style={{ color: "#C0392B", fontFamily: "sans-serif", fontSize: 13, margin: "0 0 10px", background: "#fdecea", padding: "8px 12px", borderRadius: 8 }}>{broadcastError}</p>}
+          <div style={styles.hoursBtns}>
+            <button style={styles.cancelHoursBtn} onClick={() => setShowBroadcast(false)}>Cancel</button>
+            <button style={styles.saveHoursBtn} disabled={broadcastSending} onClick={handleSendBroadcast}>
+              {broadcastSending ? "Sending…" : "Send to " + uniqueStudents.length + (uniqueStudents.length === 1 ? " Student" : " Students")}
+            </button>
+          </div>
+        </div>
+      )}
+
       <div style={{ textAlign: "right", marginBottom: 4 }}>
         <a href="#quick-reference" style={styles.jumpLink}>📋 How to Use Coach View</a>
       </div>
+
 
       <div style={styles.dayScroll}>
         {DAYS.map((d, i) => {
@@ -394,6 +509,7 @@ export default function AdminView() {
             ["Clear custom hours", "Set Hours → Clear Custom Hours"],
             ["Remove a booking", "Click day → Remove next to name"],
             ["Resend a notification email", "Click day tab → Resend next to their name (combines all their slots that day into one email, sent only to them)"],
+            ["Message all students at once", "Click Message All Students → write subject/message → Send (goes to everyone booked in the current date range)"],
             ["Student cancels", "bookgoatpractice.com → Cancel My Slot"],
           ].map(([task, how], i) => (
             <tr key={i} style={{ background: i % 2 === 0 ? "#f9f6f0" : "white" }}>
@@ -437,6 +553,9 @@ const styles = {
   dateRangeLabel: { display: "block", fontFamily: "sans-serif", fontSize: 11, fontWeight: "bold", color: "#888", textTransform: "uppercase", letterSpacing: "0.5px" },
   dateRangeValue: { display: "block", fontFamily: "sans-serif", fontSize: 15, fontWeight: "bold", color: "#3B2008", marginTop: 2 },
   dateInput: { padding: "9px 10px", border: "1.5px solid #ddd", borderRadius: 8, fontFamily: "sans-serif", fontSize: 14 },
+  broadcastInput: { width: "100%", padding: "10px 12px", border: "1.5px solid #ddd", borderRadius: 8, fontFamily: "sans-serif", fontSize: 14, marginBottom: 14, boxSizing: "border-box" },
+  broadcastTextarea: { width: "100%", padding: "10px 12px", border: "1.5px solid #ddd", borderRadius: 8, fontFamily: "sans-serif", fontSize: 14, marginBottom: 14, boxSizing: "border-box", resize: "vertical" },
+  label: { display: "block", fontFamily: "sans-serif", fontSize: 11, fontWeight: "bold", color: "#777", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 4 },
   hoursPanel: { background: "white", border: "2px solid #AED6F1", borderRadius: 12, padding: 20, marginBottom: 16, boxShadow: "0 2px 10px rgba(0,0,0,0.08)" },
   hoursPanelTitle: { margin: "0 0 6px", fontSize: 17, color: "#3B2008" },
   hoursPanelHint: { margin: "0 0 16px", fontSize: 13, fontFamily: "sans-serif", color: "#666", lineHeight: 1.5 },
