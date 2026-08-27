@@ -27,7 +27,7 @@ async function sendStudentConfirmation({ name, email, day, slots }) {
     await fetch(STUDENT_CONFIRM_ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, email, day, slots }),
+      body: JSON.stringify({ name, email, days: [{ day, slots }] }),
     });
   } catch (_) {}
 }

@@ -5,24 +5,26 @@ const TIME_OPTS = makeTimeOptions();
 const BOOKING_EMAIL_KEY = "041fdbc9-cf60-4674-a2e4-1ffa01ee0ab7";
 const STUDENT_CONFIRM_ENDPOINT = "https://kafxlwboepfekybipzog.supabase.co/functions/v1/student-confirmation";
 
-// Resends the student's own confirmation email (same one they get automatically when they book).
-async function resendStudentConfirmation({ name, email, day, slotLabels }) {
+// Resends the student's own confirmation email (same one they get automatically when they book),
+// covering every day they're booked - one email, not one per day.
+async function resendStudentConfirmation({ name, email, days }) {
   try {
     await fetch(STUDENT_CONFIRM_ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, email, day, slots: slotLabels }),
+      body: JSON.stringify({ name, email, days }),
     });
   } catch (_) {}
 }
 
-// Sends ONE grouped notification email for a person covering every slot they booked on a given day.
-async function resendGroupedNotification({ name, email, phone, day, slotLabels }) {
-  const slotsText = slotLabels.join(", ");
-  const countLabel = slotLabels.length + (slotLabels.length === 1 ? " slot" : " slots");
-  const subject = "RESEND - Goat practice - " + name + ", " + day + " (" + countLabel + ")";
+// Sends ONE grouped notification email to the coach covering every day/slot a person has booked.
+async function resendGroupedNotification({ name, email, phone, days }) {
+  const dayLines = days.map(d => d.day + ": " + d.slots.join(", "));
+  const totalSlots = days.reduce((sum, d) => sum + d.slots.length, 0);
+  const countLabel = totalSlots + (totalSlots === 1 ? " slot" : " slots") + " across " + days.length + (days.length === 1 ? " day" : " days");
+  const subject = "RESEND - Goat practice - " + name + " (" + countLabel + ")";
   const message = "This is a resent booking notification (sent manually from Coach View).\n\n" +
-    "Name: " + name + "\nEmail: " + email + "\nPhone: " + phone + "\nDay: " + day + "\nTimes: " + slotsText;
+    "Name: " + name + "\nEmail: " + email + "\nPhone: " + phone + "\n\n" + dayLines.join("\n");
   try {
     const res = await fetch("https://api.web3forms.com/submit", {
       method: "POST",
@@ -31,8 +33,8 @@ async function resendGroupedNotification({ name, email, phone, day, slotLabels }
         access_key: BOOKING_EMAIL_KEY,
         subject,
         from_name: "Goat Practice",
-        name, email, phone, day,
-        slots: slotsText,
+        name, email, phone,
+        days: dayLines.join(" | "),
         message,
         botcheck: "",
       }),
@@ -200,16 +202,27 @@ export default function AdminView() {
     if (!(booking.email in firstSlotTimeByEmail)) firstSlotTimeByEmail[booking.email] = slot.time;
   });
 
-  // All unique students across the current practice date range (for the broadcast tool),
-  // deduped by email, keeping the first name seen for each.
+  // All unique students across the ENTIRE current practice date range (not just the day being
+  // viewed), each with every day/slot they hold. Powers both the broadcast tool (so any message
+  // can show real booking specifics) and the Resend button (so one click covers every day a
+  // person is booked, not just today's).
   const allStudents = {};
   DAYS.forEach(d => {
+    const dayLabel = formatDayLabel(d);
     const dayB = bookings[formatDate(d)] || {};
-    Object.values(dayB).forEach(b => {
-      if (!allStudents[b.email]) allStudents[b.email] = { name: b.name, email: b.email };
+    const bySlotTime = Object.entries(dayB).sort((a, b) => Number(a[0]) - Number(b[0]));
+    bySlotTime.forEach(([time, b]) => {
+      if (!allStudents[b.email]) allStudents[b.email] = { name: b.name, email: b.email, phone: b.phone, byDay: {} };
+      if (!allStudents[b.email].byDay[dayLabel]) allStudents[b.email].byDay[dayLabel] = [];
+      const slot = DAILY_SLOTS.find(s => s.time === Number(time));
+      allStudents[b.email].byDay[dayLabel].push(slot ? slot.label : time);
     });
   });
-  const uniqueStudents = Object.values(allStudents);
+  const uniqueStudents = Object.values(allStudents).map(s => ({
+    name: s.name,
+    email: s.email,
+    bookingSummary: Object.entries(s.byDay).map(([day, slots]) => day + ": " + slots.join(", ")).join("\n"),
+  }));
 
   async function handleSendBroadcast() {
     setBroadcastError("");
@@ -248,27 +261,28 @@ export default function AdminView() {
     setBroadcastSending(false);
   }
 
-
-  // Resends both the coach notification and the student's own confirmation email,
-  // covering every slot that person holds this day.
+  // Resends both the coach notification and the student's own confirmation email, covering
+  // EVERY day and slot that person holds across the whole practice date range - one email each,
+  // not one per day.
   async function resendPersonNotification(booking) {
-    const dayLabel = formatDayLabel(DAYS[selectedDayIndex]);
-    const slotLabels = slotLabelsByEmail[booking.email] || [];
-    const countLabel = slotLabels.length + (slotLabels.length === 1 ? " slot" : " slots");
+    const student = allStudents[booking.email];
+    const days = Object.entries(student.byDay).map(([day, slots]) => ({ day, slots }));
+    const totalSlots = days.reduce((sum, d) => sum + d.slots.length, 0);
+    const summary = days.map(d => d.day + ": " + d.slots.join(", ")).join("\n");
     const ok = window.confirm(
-      "Resend for " + booking.name + " (" + dayLabel + ")?\n\n" +
-      "This sends 2 emails covering " + countLabel + " (" + slotLabels.join(", ") + "):\n" +
+      "Resend for " + booking.name + "?\n\n" +
+      "This sends 2 emails covering all " + totalSlots + " slot(s) across " + days.length + " day(s):\n" + summary + "\n\n" +
       "1. Coach notification\n" +
       "2. Confirmation directly to " + booking.email
     );
     if (!ok) return;
     setBusy(true);
     const [coachOk] = await Promise.all([
-      resendGroupedNotification({ name: booking.name, email: booking.email, phone: booking.phone, day: dayLabel, slotLabels }),
-      resendStudentConfirmation({ name: booking.name, email: booking.email, day: dayLabel, slotLabels }),
+      resendGroupedNotification({ name: booking.name, email: booking.email, phone: booking.phone, days }),
+      resendStudentConfirmation({ name: booking.name, email: booking.email, days }),
     ]);
     setBusy(false);
-    showToast(coachOk ? "Sent to coach + " + booking.name + " for " + dayLabel + "." : "Could not send coach notification for " + booking.name + ".");
+    showToast(coachOk ? "Sent to coach + " + booking.name + " (all days)." : "Could not send coach notification for " + booking.name + ".");
   }
 
   return (
@@ -327,7 +341,8 @@ export default function AdminView() {
           <h3 style={styles.hoursPanelTitle}>Message All Students</h3>
           <p style={styles.hoursPanelHint}>
             Sends one email to every student booked between {formatDayLabel(DAYS[0])} and {formatDayLabel(DAYS[DAYS.length - 1])}
-            {" "}({uniqueStudents.length} {uniqueStudents.length === 1 ? "person" : "people"}). Each student only sees their own email.
+            {" "}({uniqueStudents.length} {uniqueStudents.length === 1 ? "person" : "people"}). Each student's own booking days/times are
+            automatically added at the bottom of their email, so they always see the specifics — not just your message.
           </p>
           <label style={styles.label}>Subject</label>
           <input
@@ -454,7 +469,9 @@ export default function AdminView() {
           const bg = booking ? "#fff" : isPast ? "#f5f0e8" : !available ? "#f5f0e8" : "#f9faf9";
           const statusEl = booking ? booking.name : isPast ? <span style={styles.closedLabel}>past</span> : !available ? <span style={styles.closedLabel}>{isLunch ? "lunch" : "closed"}</span> : <span style={styles.openLabel}>open</span>;
           const showResend = booking && firstSlotTimeByEmail[booking.email] === slot.time;
-          const resendCount = booking ? (slotLabelsByEmail[booking.email] || []).length : 0;
+          const resendStudent = booking ? allStudents[booking.email] : null;
+          const resendCount = resendStudent ? Object.values(resendStudent.byDay).reduce((sum, arr) => sum + arr.length, 0) : 0;
+          const resendDayCount = resendStudent ? Object.keys(resendStudent.byDay).length : 0;
 
           if (isMobile) {
             return (
@@ -462,7 +479,7 @@ export default function AdminView() {
                 <div style={styles.mobileTopLine}>
                   <strong style={{ color: (!available || isPast) && !booking ? "#bbb" : "#2c1a0e" }}>{slot.label}</strong>
                   <div style={{ display: "flex", gap: 6 }}>
-                    {showResend && <button style={styles.resendRowBtn} disabled={busy} onClick={() => resendPersonNotification(booking)}>✉️ Resend{resendCount > 1 ? " (" + resendCount + ")" : ""}</button>}
+                    {showResend && <button style={styles.resendRowBtn} disabled={busy} onClick={() => resendPersonNotification(booking)}>✉️ Resend{resendCount > 1 ? " (" + resendCount + (resendDayCount > 1 ? "/" + resendDayCount + "d" : "") + ")" : ""}</button>}
                     {booking && <button style={styles.removeBtn} disabled={busy} onClick={() => removeBooking(slot.time, booking.name, slot.label)}>Remove</button>}
                   </div>
                 </div>
@@ -484,7 +501,7 @@ export default function AdminView() {
               <span style={styles.colPhone}>{booking ? booking.phone || "" : ""}</span>
               <span style={styles.colEmail}>{booking ? booking.email : ""}</span>
               <span style={styles.colAct}>
-                {showResend && <button style={styles.resendRowBtn} disabled={busy} onClick={() => resendPersonNotification(booking)}>✉️ Resend{resendCount > 1 ? " (" + resendCount + ")" : ""}</button>}
+                {showResend && <button style={styles.resendRowBtn} disabled={busy} onClick={() => resendPersonNotification(booking)}>✉️ Resend{resendCount > 1 ? " (" + resendCount + (resendDayCount > 1 ? "/" + resendDayCount + "d" : "") + ")" : ""}</button>}
                 {booking && <button style={styles.removeBtn} disabled={busy} onClick={() => removeBooking(slot.time, booking.name, slot.label)}>Remove</button>}
               </span>
             </div>
@@ -508,7 +525,7 @@ export default function AdminView() {
             ["Set custom hours", "Click day tab → Set Hours"],
             ["Clear custom hours", "Set Hours → Clear Custom Hours"],
             ["Remove a booking", "Click day → Remove next to name"],
-            ["Resend a notification email", "Click day tab → Resend next to their name (combines all their slots that day into one email, sent only to them)"],
+            ["Resend a notification email", "Click Resend next to their name (one email covers every day/time they're booked, anywhere in the date range, sent only to them)"],
             ["Message all students at once", "Click Message All Students → write subject/message → Send (goes to everyone booked in the current date range)"],
             ["Student cancels", "bookgoatpractice.com → Cancel My Slot"],
           ].map(([task, how], i) => (
