@@ -79,8 +79,8 @@ Total cost: about $14/year + a few dollars in SMS.
 2. Find `goat-practice-scheduler` in the list and click **Import**
 3. Vercel will detect it's a Vite/React app automatically
 4. Under **Environment Variables**, click **Add** and enter:
-   - Name: `VITE_ADMIN_PASSWORD` → Value: `Goat$2026`
    - Name: `VITE_TWILIO_WEBHOOK` → Value: (leave blank for now — we'll add this in Part 4)
+   - (Coach View no longer uses a shared password. Coaches sign in with their own email and password. See "Coach accounts" below.)
 5. Click **Deploy**
 6. Wait about 60 seconds — you'll see a confetti screen when it's done
 7. Vercel gives you a URL like `goat-practice-scheduler.vercel.app` — your app is live!
@@ -245,7 +245,7 @@ That's it — she'll start getting booking notifications immediately.
 
 - Go to `bookgoatpractice.com`
 - Tap **Coach View** (top right tab)
-- Enter password: `Goat$2026`
+- Sign in with your own coach email and password
 - You'll see:
   - Total bookings across all 10 days
   - Full roster for each day (name + phone number)
@@ -262,11 +262,25 @@ That's it — she'll start getting booking notifications immediately.
 **"I'm not getting texts"**
 → Check that VITE_TWILIO_WEBHOOK is set in Vercel. Make sure you deployed after adding it.
 
-**"The Coach View password isn't working"**
-→ Check that VITE_ADMIN_PASSWORD is set correctly in Vercel's Environment Variables.
+**"I can't sign in to Coach View"**
+→ Check the email is spelled the way it was added as a coach account. If it says "not set up as a coach", the email needs to be added to the coach list (see "Coach accounts" below).
 
-**"I need to change the password"**
-→ Go to Vercel → Settings → Environment Variables → edit VITE_ADMIN_PASSWORD → Save. Vercel redeploys automatically.
+**"I need to change my password"**
+→ Coach View has no "forgot password" page. Ask whoever manages the Supabase project to delete your user in Authentication → Users and create it again with a new password. Your email stays on the coach list, so nothing else needs to change.
+
+---
+
+## COACH ACCOUNTS
+
+Each coach has their own login. Nobody shares a password.
+
+1. In the Supabase dashboard open **Authentication → Users → Add user**, enter the coach's email and a password, and confirm the email.
+2. Turn **off** "Allow new users to sign up" (Authentication → Sign In / Providers) so strangers cannot create accounts.
+3. In the SQL editor, add the email to the coach list:
+   `insert into public.app_admins (email) values ('coach@example.com');`
+4. To remove a coach, delete the email from `public.app_admins` and delete their user in Authentication → Users.
+
+Only emails in `public.app_admins` can see student contact details or change bookings.
 
 ---
 

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import {
   DAILY_SLOTS, formatDate, formatDayLabel, isValidEmail, isValidPhone, formatPhone,
-  loadBookings, bookSlot, cancelSlot, isSlotAvailable, getDaysInRange, defaultDateRange
+  loadSchedule, findMyBookings, bookSlot, cancelSlot, isSlotAvailable, getDaysInRange, defaultDateRange
 } from "./utils";
 
 const BOOKING_EMAIL_KEY = "041fdbc9-cf60-4674-a2e4-1ffa01ee0ab7";
@@ -75,7 +75,7 @@ export default function BookingView({ mode }) {
   const DAYS = getDaysInRange(settings.startDate, settings.endDate);
   const selectedDayIndex = Math.min(selectedDay, DAYS.length - 1);
 
-  async function refresh() { setData(await loadBookings()); }
+  async function refresh() { setData(await loadSchedule()); }
   useEffect(() => { refresh(); }, []);
 
   if (!data) return <div style={styles.loading}>Loading schedule…</div>;
@@ -125,28 +125,30 @@ export default function BookingView({ mode }) {
   async function handleCancelLookup() {
     const email = cancelEmail.trim();
     if (!isValidEmail(email)) { setCancelResult({ error: "Enter the email you used to book." }); return; }
-    const fresh = await loadBookings();
-    setData(fresh);
-    const found = [];
+    const res = await findMyBookings(email);
+    await refresh();
+    if (!res.ok) { setCancelResult({ error: "Could not look up your booking. Please try again." }); return; }
     const today = new Date(); today.setHours(0, 0, 0, 0);
-    for (const [dk, slots] of Object.entries(fresh.bookings)) {
-      const parts = dk.split("-");
+    const found = [];
+    for (const b of res.bookings) {
+      const parts = b.dk.split("-");
       const date = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
       if (date < today) continue;
-      for (const [time, b] of Object.entries(slots)) {
-        if (String(b.email).toLowerCase() === email.toLowerCase()) {
-          const slot = DAILY_SLOTS.find(s => String(s.time) === String(time));
-          found.push({ dk, time, label: slot?.label, dateStr: dk });
-        }
-      }
+      const slot = DAILY_SLOTS.find(s => String(s.time) === String(b.time));
+      found.push({ dk: b.dk, time: b.time, label: (slot && slot.label) || b.label, dateStr: b.dk });
     }
     setCancelResult(found.length ? { bookings: found } : { error: "No upcoming bookings found for that email." });
   }
 
   async function doCancel(dk, time, label) {
     setBusy(true);
-    await cancelSlot({ date: dk, slotTime: time, email: cancelEmail.trim() });
+    const res = await cancelSlot({ date: dk, slotTime: time, email: cancelEmail.trim() });
     setBusy(false);
+    if (!res.ok) {
+      await refresh();
+      setCancelResult({ error: "That booking could not be cancelled. It may already be cancelled. Please look it up again." });
+      return;
+    }
     const dayLabel = formatDateKey(dk);
     notifyCoaches({ kind: "cancellation", name: "(student)", email: cancelEmail.trim(), phone: "", day: dayLabel, slot: label });
     await refresh();
