@@ -264,14 +264,17 @@ export async function findMyBookings(email) {
   } catch (e) { return { ok: false, error: String(e) }; }
 }
 
-// Cancels a booking only if the email matches. ok is false when nothing matched.
+// Cancels a booking only if the email matches, and emails the student a cancellation
+// notice. ok is false when nothing matched.
 export async function cancelSlot(opts) {
   try {
-    const removed = await supa("rpc/cancel_my_booking", {
+    const res = await fetch(SUPA_URL + "/functions/v1/cancel-booking", {
       method: "POST",
-      body: JSON.stringify({ p_date: opts.date, p_slot_time: Number(opts.slotTime), p_email: opts.email }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ date: opts.date, slotTime: Number(opts.slotTime), email: opts.email }),
     });
-    return { ok: removed === true };
+    const result = await res.json().catch(() => ({}));
+    return { ok: res.ok && result.ok === true, emailed: result.emailed === true };
   } catch (e) { return { ok: false, error: String(e) }; }
 }
 
