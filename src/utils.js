@@ -1,3 +1,5 @@
+import { createClient } from "@supabase/supabase-js";
+
 export const SLOT_INTERVAL = 15;
 export const DAY_START = 13 * 60;
 export const DAY_END = 16 * 60;
@@ -114,11 +116,32 @@ export function isSlotAvailable(slotTime, hours) {
 const SUPA_URL = "https://kafxlwboepfekybipzog.supabase.co";
 const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImthZnhsd2JvZXBmZWt5Ymlwem9nIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1NzMwMDMsImV4cCI6MjA5ODE0OTAwM30.RsuH-GXnv63_vRQ6-veg3o8xa_gBYPqu7KbYGAjJeXA";
 
-async function supa(path, opts) {
+// Coaches sign in with Supabase Auth (email + password). Students never sign in.
+// The browser only ever holds the public key plus, for a signed-in coach, that
+// coach's own session token. The database decides what each of them may do.
+const authClient = createClient(SUPA_URL, SUPA_KEY, {
+  auth: { persistSession: true, autoRefreshToken: true, storageKey: "goat-coach-auth" },
+});
+
+async function coachToken() {
+  try {
+    const { data } = await authClient.auth.getSession();
+    return data && data.session ? data.session.access_token : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+export function getCoachAccessToken() { return coachToken(); }
+
+// admin=true sends the signed-in coach's token instead of the public key.
+async function supa(path, opts, admin) {
+  const token = admin ? await coachToken() : null;
+  if (admin && !token) throw new Error("Not signed in");
   const res = await fetch(SUPA_URL + "/rest/v1/" + path, {
     headers: {
       "apikey": SUPA_KEY,
-      "Authorization": "Bearer " + SUPA_KEY,
+      "Authorization": "Bearer " + (token || SUPA_KEY),
       "Content-Type": "application/json",
       "Prefer": opts && opts.prefer ? opts.prefer : "return=representation",
     },
@@ -129,30 +152,79 @@ async function supa(path, opts) {
   return text ? JSON.parse(text) : [];
 }
 
-export async function loadBookings() {
+// True only when the signed-in user is on the coach allowlist (checked in the database).
+export async function isCoach() {
   try {
-    const [rows, blocked, hours, settingsRows] = await Promise.all([
-      supa("goat_bookings?select=date,slot_time,slot_label,name,email,phone,notes&order=date,slot_time"),
+    const res = await supa("rpc/is_admin", { method: "POST", body: "{}" }, true);
+    return res === true;
+  } catch (_) {
+    return false;
+  }
+}
+
+export async function coachSignIn(email, password) {
+  const { error } = await authClient.auth.signInWithPassword({ email: String(email).trim(), password });
+  if (error) return { ok: false, error: "Incorrect email or password." };
+  if (!(await isCoach())) {
+    await authClient.auth.signOut();
+    return { ok: false, error: "That account is not set up as a coach." };
+  }
+  return { ok: true };
+}
+
+export async function coachSignOut() {
+  try { await authClient.auth.signOut(); } catch (_) {}
+}
+
+function buildSchedule(rows, blocked, hours, settingsRows, rowToValue) {
+  const bookings = {};
+  for (const r of rows) {
+    if (!bookings[r.date]) bookings[r.date] = {};
+    bookings[r.date][r.slot_time] = rowToValue(r);
+  }
+  const blockedMap = {};
+  for (const b of blocked) blockedMap[b.date] = true;
+  const hoursMap = {};
+  for (const h of hours) hoursMap[h.date] = h;
+  const settings = (settingsRows && settingsRows.length && settingsRows[0].start_date && settingsRows[0].end_date)
+    ? { startDate: settingsRows[0].start_date, endDate: settingsRows[0].end_date }
+    : defaultDateRange();
+  return { bookings, blocked: blockedMap, hours: hoursMap, settings };
+}
+
+const HOURS_QUERY = "goat_day_hours?select=date,morning_start,morning_end,afternoon_start,afternoon_end,lunch_blocked";
+
+// Public schedule for students: which slots are taken (no names, emails, or phones).
+export async function loadSchedule() {
+  try {
+    const [taken, blocked, hours, settingsRows] = await Promise.all([
+      supa("rpc/get_taken_slots", { method: "POST", body: "{}" }),
       supa("goat_blocked_days?select=date"),
-      supa("goat_day_hours?select=date,morning_start,morning_end,afternoon_start,afternoon_end,lunch_blocked"),
+      supa(HOURS_QUERY),
       supa("goat_settings?select=start_date,end_date&limit=1"),
     ]);
-    const bookings = {};
-    for (const r of rows) {
-      if (!bookings[r.date]) bookings[r.date] = {};
-      bookings[r.date][r.slot_time] = { name: r.name, email: r.email, phone: r.phone, notes: r.notes };
-    }
-    const blockedMap = {};
-    for (const b of blocked) blockedMap[b.date] = true;
-    const hoursMap = {};
-    for (const h of hours) hoursMap[h.date] = h;
-    const settings = (settingsRows && settingsRows.length && settingsRows[0].start_date && settingsRows[0].end_date)
-      ? { startDate: settingsRows[0].start_date, endDate: settingsRows[0].end_date }
-      : defaultDateRange();
-    return { bookings, blocked: blockedMap, hours: hoursMap, settings };
+    return buildSchedule(taken, blocked, hours, settingsRows, () => true);
   } catch (e) {
-    console.error("loadBookings failed", e);
+    console.error("loadSchedule failed", e);
     return { bookings: {}, blocked: {}, hours: {}, settings: defaultDateRange() };
+  }
+}
+
+// Full schedule for Coach View, including student contact details. Requires a coach sign-in.
+// Returns { authError: true } instead of an empty schedule when the session is missing or expired,
+// so a coach never mistakes a failed load for "no bookings".
+export async function loadAdminBookings() {
+  try {
+    const [rows, blocked, hours, settingsRows] = await Promise.all([
+      supa("goat_bookings?select=date,slot_time,slot_label,name,email,phone,notes&order=date,slot_time", undefined, true),
+      supa("goat_blocked_days?select=date"),
+      supa(HOURS_QUERY),
+      supa("goat_settings?select=start_date,end_date&limit=1"),
+    ]);
+    return buildSchedule(rows, blocked, hours, settingsRows, r => ({ name: r.name, email: r.email, phone: r.phone, notes: r.notes }));
+  } catch (e) {
+    console.error("loadAdminBookings failed", e);
+    return { authError: true };
   }
 }
 
@@ -162,7 +234,7 @@ export async function saveSettings(startDate, endDate) {
       method: "POST",
       prefer: "resolution=merge-duplicates,return=minimal",
       body: JSON.stringify({ id: 1, start_date: startDate, end_date: endDate }),
-    });
+    }, true);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: String(e) };
@@ -183,16 +255,29 @@ export async function bookSlot(opts) {
   }
 }
 
+// A student's own upcoming bookings, found by the email they booked with.
+// Returns date and slot only, never anyone's name or phone number.
+export async function findMyBookings(email) {
+  try {
+    const rows = await supa("rpc/find_my_bookings", { method: "POST", body: JSON.stringify({ p_email: email }) });
+    return { ok: true, bookings: rows.map(r => ({ dk: r.date, time: r.slot_time, label: r.slot_label })) };
+  } catch (e) { return { ok: false, error: String(e) }; }
+}
+
+// Cancels a booking only if the email matches. ok is false when nothing matched.
 export async function cancelSlot(opts) {
   try {
-    await supa("goat_bookings?date=eq." + opts.date + "&slot_time=eq." + opts.slotTime + "&email=eq." + encodeURIComponent(opts.email), { method: "DELETE", prefer: "return=minimal" });
-    return { ok: true };
+    const removed = await supa("rpc/cancel_my_booking", {
+      method: "POST",
+      body: JSON.stringify({ p_date: opts.date, p_slot_time: Number(opts.slotTime), p_email: opts.email }),
+    });
+    return { ok: removed === true };
   } catch (e) { return { ok: false, error: String(e) }; }
 }
 
 export async function adminRemove(opts) {
   try {
-    await supa("goat_bookings?date=eq." + opts.date + "&slot_time=eq." + opts.slotTime, { method: "DELETE", prefer: "return=minimal" });
+    await supa("goat_bookings?date=eq." + opts.date + "&slot_time=eq." + opts.slotTime, { method: "DELETE", prefer: "return=minimal" }, true);
     return { ok: true };
   } catch (e) { return { ok: false, error: String(e) }; }
 }
@@ -200,9 +285,9 @@ export async function adminRemove(opts) {
 export async function setDayBlock(opts) {
   try {
     if (opts.blocked) {
-      await supa("goat_blocked_days", { method: "POST", prefer: "return=minimal", body: JSON.stringify({ date: opts.date }) });
+      await supa("goat_blocked_days", { method: "POST", prefer: "return=minimal", body: JSON.stringify({ date: opts.date }) }, true);
     } else {
-      await supa("goat_blocked_days?date=eq." + opts.date, { method: "DELETE", prefer: "return=minimal" });
+      await supa("goat_blocked_days?date=eq." + opts.date, { method: "DELETE", prefer: "return=minimal" }, true);
     }
     return { ok: true };
   } catch (e) { return { ok: false, error: String(e) }; }
@@ -214,14 +299,14 @@ export async function saveDayHours(date, hours) {
       method: "POST",
       prefer: "resolution=merge-duplicates,return=minimal",
       body: JSON.stringify({ date, ...hours }),
-    });
+    }, true);
     return { ok: true };
   } catch (e) { return { ok: false, error: String(e) }; }
 }
 
 export async function clearDayHours(date) {
   try {
-    await supa("goat_day_hours?date=eq." + date, { method: "DELETE", prefer: "return=minimal" });
+    await supa("goat_day_hours?date=eq." + date, { method: "DELETE", prefer: "return=minimal" }, true);
     return { ok: true };
   } catch (e) { return { ok: false, error: String(e) }; }
 }

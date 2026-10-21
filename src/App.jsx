@@ -1,23 +1,46 @@
 import { useState, useEffect } from "react";
 import BookingView from "./BookingView";
 import AdminView from "./AdminView";
+import { coachSignIn, coachSignOut, isCoach } from "./utils";
 
 export default function App() {
   const [page, setPage] = useState("book"); // "book" | "cancel" | "admin"
   const [adminUnlocked, setAdminUnlocked] = useState(false);
+  const [adminEmail, setAdminEmail] = useState("");
   const [adminInput, setAdminInput] = useState("");
   const [adminError, setAdminError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [signingIn, setSigningIn] = useState(false);
 
-  const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || "Goat$2026";
+  // Pick up an existing coach session (for example after a page refresh).
+  useEffect(() => {
+    isCoach().then(ok => { if (ok) setAdminUnlocked(true); });
+  }, []);
 
-  function handleAdminLogin() {
-    if (adminInput === ADMIN_PASSWORD) {
+  async function handleAdminLogin() {
+    if (signingIn) return;
+    setSigningIn(true);
+    setAdminError("");
+    const res = await coachSignIn(adminEmail, adminInput);
+    setSigningIn(false);
+    if (res.ok) {
       setAdminUnlocked(true);
-      setAdminError("");
+      setAdminInput("");
     } else {
-      setAdminError("Incorrect password.");
+      setAdminError(res.error);
     }
+  }
+
+  async function handleSignOut() {
+    await coachSignOut();
+    setAdminUnlocked(false);
+    setAdminInput("");
+  }
+
+  function handleSessionExpired() {
+    coachSignOut();
+    setAdminUnlocked(false);
+    setAdminError("Your session expired. Please sign in again.");
   }
 
   return (
@@ -43,17 +66,36 @@ export default function App() {
       {page === "cancel" && <BookingView mode="cancel" />}
       {page === "admin" && (
         adminUnlocked
-          ? <AdminView />
+          ? (
+            <>
+              <div style={styles.signOutRow}>
+                <button style={styles.signOutBtn} onClick={handleSignOut}>Sign out</button>
+              </div>
+              <AdminView onSessionExpired={handleSessionExpired} />
+            </>
+          )
           : (
             <div style={styles.loginWrap}>
               <div style={styles.loginBox}>
                 <div style={styles.loginIcon}>🔒</div>
                 <h2 style={styles.loginTitle}>Coach Access</h2>
-                <p style={styles.loginHint}>Enter your password to view the full schedule.</p>
+                <p style={styles.loginHint}>Sign in with your coach email and password to view the full schedule.</p>
+                <div style={styles.emailWrap}>
+                  <input
+                    style={styles.emailInput}
+                    type="email"
+                    autoComplete="username"
+                    placeholder="Email"
+                    value={adminEmail}
+                    onChange={e => setAdminEmail(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && handleAdminLogin()}
+                  />
+                </div>
                 <div style={styles.passwordWrap}>
                   <input
                     style={styles.input}
                     type={showPassword ? "text" : "password"}
+                    autoComplete="current-password"
                     placeholder="Password"
                     value={adminInput}
                     onChange={e => setAdminInput(e.target.value)}
@@ -69,7 +111,7 @@ export default function App() {
                   </button>
                 </div>
                 {adminError && <p style={styles.errorMsg}>{adminError}</p>}
-                <button style={styles.loginBtn} onClick={handleAdminLogin}>Enter</button>
+                <button style={styles.loginBtn} disabled={signingIn} onClick={handleAdminLogin}>{signingIn ? "Signing in…" : "Sign in"}</button>
               </div>
             </div>
           )
@@ -104,6 +146,10 @@ const styles = {
   loginTitle: { margin: "0 0 6px", fontSize: 22, color: "#3B2008" },
   loginHint: { margin: "0 0 20px", fontSize: 13, fontFamily: "sans-serif", color: "#666" },
   input: { width: "100%", padding: "11px 40px 11px 14px", border: "1.5px solid #ddd", borderRadius: 8, fontFamily: "sans-serif", fontSize: 15, marginBottom: 0, boxSizing: "border-box" },
+  emailWrap: { marginBottom: 10 },
+  emailInput: { width: "100%", padding: "11px 14px", border: "1.5px solid #ddd", borderRadius: 8, fontFamily: "sans-serif", fontSize: 15, boxSizing: "border-box" },
+  signOutRow: { maxWidth: 760, margin: "0 auto", padding: "12px 16px 0", textAlign: "right" },
+  signOutBtn: { padding: "6px 14px", background: "none", border: "1.5px solid #C9A96E", borderRadius: 8, color: "#6B3A1F", fontFamily: "sans-serif", fontSize: 13, cursor: "pointer" },
   passwordWrap: { position: "relative", marginBottom: 10 },
   showPasswordBtn: { position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", fontSize: 17, padding: 6, lineHeight: 1 },
   errorMsg: { color: "#C0392B", fontFamily: "sans-serif", fontSize: 13, margin: "0 0 10px" },

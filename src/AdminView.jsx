@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { DAILY_SLOTS, formatDate, formatDayLabel, loadBookings, adminRemove, setDayBlock, saveDayHours, clearDayHours, makeTimeOptions, isSlotAvailable, LUNCH_START, LUNCH_END, getDaysInRange, defaultDateRange, saveSettings } from "./utils";
+import { DAILY_SLOTS, formatDate, formatDayLabel, loadAdminBookings, getCoachAccessToken, adminRemove, setDayBlock, saveDayHours, clearDayHours, makeTimeOptions, isSlotAvailable, LUNCH_START, LUNCH_END, getDaysInRange, defaultDateRange, saveSettings } from "./utils";
 
 const TIME_OPTS = makeTimeOptions();
 const BOOKING_EMAIL_KEY = "041fdbc9-cf60-4674-a2e4-1ffa01ee0ab7";
@@ -60,7 +60,7 @@ function TimeSelect({ value, onChange, placeholder, minValue, maxValue }) {
   );
 }
 
-export default function AdminView() {
+export default function AdminView({ onSessionExpired }) {
   const [data, setData] = useState(null);
   const [selectedDay, setSelectedDay] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -88,7 +88,12 @@ export default function AdminView() {
   const DAYS = getDaysInRange(settings.startDate, settings.endDate);
   const selectedDayIndex = Math.min(selectedDay, DAYS.length - 1);
 
-  async function refresh() { setData(await loadBookings()); }
+  async function refresh() {
+    const fresh = await loadAdminBookings();
+    // A failed or expired coach session must never look like "no bookings".
+    if (fresh.authError) { if (onSessionExpired) onSessionExpired(); return; }
+    setData(fresh);
+  }
   useEffect(function() { refresh(); }, []);
 
   useEffect(function() {
@@ -241,9 +246,11 @@ export default function AdminView() {
 
     setBroadcastSending(true);
     try {
+      // Only a signed-in coach may send; the function checks this token.
+      const token = await getCoachAccessToken();
       const res = await fetch("https://kafxlwboepfekybipzog.supabase.co/functions/v1/broadcast-message", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + (token || "") },
         body: JSON.stringify({ subject, message, recipients: uniqueStudents }),
       });
       const result = await res.json();
@@ -536,7 +543,7 @@ export default function AdminView() {
           ))}
         </tbody>
       </table>
-      <p style={styles.quickRefNote}>Students book at <strong>bookgoatpractice.com</strong> · Password: <strong>Goat$2026</strong></p>
+      <p style={styles.quickRefNote}>Students book at <strong>bookgoatpractice.com</strong> · Coach View uses your own email and password</p>
     </div>
     </div>
   );
