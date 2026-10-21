@@ -7,14 +7,19 @@ const STUDENT_CONFIRM_ENDPOINT = "https://kafxlwboepfekybipzog.supabase.co/funct
 
 // Resends the student's own confirmation email (same one they get automatically when they book),
 // covering every day they're booked - one email, not one per day.
+// Returns true only if the email service accepted the message.
 async function resendStudentConfirmation({ name, email, days }) {
   try {
-    await fetch(STUDENT_CONFIRM_ENDPOINT, {
+    const res = await fetch(STUDENT_CONFIRM_ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, email, days }),
     });
-  } catch (_) {}
+    const result = await res.json().catch(() => ({}));
+    return res.ok && result.success === true;
+  } catch (_) {
+    return false;
+  }
 }
 
 // Sends ONE grouped notification email to the coach covering every day/slot a person has booked.
@@ -284,12 +289,20 @@ export default function AdminView({ onSessionExpired }) {
     );
     if (!ok) return;
     setBusy(true);
-    const [coachOk] = await Promise.all([
+    const [coachOk, studentOk] = await Promise.all([
       resendGroupedNotification({ name: booking.name, email: booking.email, phone: booking.phone, days }),
       resendStudentConfirmation({ name: booking.name, email: booking.email, days }),
     ]);
     setBusy(false);
-    showToast(coachOk ? "Sent to coach + " + booking.name + " (all days)." : "Could not send coach notification for " + booking.name + ".");
+    if (coachOk && studentOk) {
+      showToast("Sent to coach + " + booking.name + " (all days).");
+    } else if (coachOk) {
+      showToast("Coach notification sent, but the email to " + booking.name + " did not go out. Confirmation emails are only sent for upcoming dates.");
+    } else if (studentOk) {
+      showToast("Email sent to " + booking.name + ", but the coach notification did not go out.");
+    } else {
+      showToast("Neither email went out for " + booking.name + ". Please try again.");
+    }
   }
 
   return (
