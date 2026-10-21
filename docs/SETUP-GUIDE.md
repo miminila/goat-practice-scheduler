@@ -266,7 +266,7 @@ That's it — she'll start getting booking notifications immediately.
 → Check the email is spelled the way it was added as a coach account. If it says "not set up as a coach", the email needs to be added to the coach list (see "Coach accounts" below).
 
 **"I need to change my password"**
-→ In the Supabase dashboard go to Authentication → Users, find your account, and send a password recovery email or set a new password.
+→ Coach View has no "forgot password" page. Ask whoever manages the Supabase project to delete your user in Authentication → Users and create it again with a new password. Your email stays on the coach list, so nothing else needs to change.
 
 ---
 
